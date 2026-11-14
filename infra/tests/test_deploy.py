@@ -1,6 +1,7 @@
 """Exercise release switching and rollback without accessing Docker or the VPS."""
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -80,6 +81,31 @@ if args and args[0] == "inspect":
         result = self.run_deploy("main; whoami")
         self.assertEqual(result.returncode, 2)
         self.assertFalse((self.base / "docker.log").exists())
+
+    def test_real_git_fetch_keeps_the_main_reference(self):
+        source = Path(__file__).resolve().parents[2]
+        self.sha = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+        candidate = self.release.with_name(self.sha)
+        self.release.rename(candidate)
+        self.release = candidate
+        (self.base / "bin/git").unlink()
+        (self.base / "repository.git").rmdir()
+        seed = self.base / "seed.git"
+        subprocess.run(["git", "init", "--bare", str(seed)], check=True, capture_output=True)
+        subprocess.run(["git", "--git-dir=" + str(seed), "fetch", "--no-tags", str(source),
+                        "HEAD:refs/heads/main"], check=True, capture_output=True)
+        subprocess.run(["git", "--git-dir=" + str(seed), "symbolic-ref", "HEAD", "refs/heads/main"],
+                       check=True, capture_output=True)
+        text = self.script.read_text().replace(
+            "repo=https://github.com/GutoValentim/sphereX-planetX-NASA.git",
+            "repo=" + shlex.quote(str(seed)),
+        )
+        self.script.write_text(text)
+        result = self.run_deploy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        main = subprocess.check_output(["git", "--git-dir=" + str(self.base / "repository.git"),
+                                        "rev-parse", "refs/heads/main"], text=True).strip()
+        self.assertEqual(main, self.sha)
 
 
 if __name__ == "__main__":

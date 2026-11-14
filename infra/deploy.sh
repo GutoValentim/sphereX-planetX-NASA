@@ -12,7 +12,7 @@ mkdir -p "$base/releases"
 if [[ ! -d $base/repository.git ]]; then
   git clone --bare "$repo" "$base/repository.git"
 fi
-git --git-dir="$base/repository.git" fetch --prune origin main:refs/heads/main
+git --git-dir="$base/repository.git" fetch --no-tags origin +refs/heads/main:refs/heads/main
 git --git-dir="$base/repository.git" merge-base --is-ancestor "$sha" refs/heads/main
 latest=$(git --git-dir="$base/repository.git" rev-parse refs/heads/main)
 if [[ $sha != "$latest" && ${SPHEREX_ALLOW_ROLLBACK:-0} != 1 ]]; then
