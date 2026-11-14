@@ -1,5 +1,14 @@
 # API
 
+## Node (porta 3000)
+
+- `GET /healthz`: `{ "status": "ok", "service": "spherex-api", "version": "<SHA>" }`.
+- `POST /api/consulta`: encaminha o JSON para `PYTHON_API_URL/receber-dados`, preservando o status e o JSON recebidos. Retorna 503 enquanto o serviço Python não estiver configurado, 502 se ele estiver inacessível e 504 em timeout.
+
+O frontend em produção também possui `GET /healthz` com `service: spherex-frontend` e o SHA da release. Esses endpoints indicam disponibilidade dos processos Node, sem afirmar que a análise científica ou o Python estão prontos.
+
+## Python (próxima etapa)
+
 Módulos reservados para implementação:
 
 - `observations.py`: observações.
