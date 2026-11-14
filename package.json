@@ -4,5 +4,8 @@
   "private": true,
   "workspaces": [
     "frontend"
-  ]
+  ],
+  "dependencies": {
+    "express": "^5.3.0"
+  }
 }
