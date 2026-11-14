@@ -10,26 +10,26 @@ export const parametros: ConsultaParametros = {
     Data: new Date("2026-11-14")
 };
 
-export async function consultar(parametros: ConsultaParametros) {
-    const response = await fetch(
-        "http://localhost:3000/api/consulta",
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify(parametros)
-        }
-    );
+// export async function consultar(parametros: ConsultaParametros) {
+//     const response = await fetch(
+//         "http://localhost:3000/api/consulta",
+//         {
+//             method: "POST",
+//             headers: {
+//                 "Content-Type": "application/json"
+//             },
+//             body: JSON.stringify(parametros)
+//         }
+//     );
 
-    if (!response.ok) {
-        throw new Error("Erro ao realizar consulta");
-    }
+//     if (!response.ok) {
+//         throw new Error("Erro ao realizar consulta");
+//     }
 
-    return await response.json();
-}
-
-// export async function consultar(parametros: ConsultaParametros): Promise<string> {
-//     void parametros;
-//     return "Texto de teste";
+//     return await response.json();
 // }
+
+export async function consultar(parametros: ConsultaParametros): Promise<string> {
+    void parametros;
+    return "Texto de teste";
+}
