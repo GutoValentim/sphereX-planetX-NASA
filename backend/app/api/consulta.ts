@@ -11,22 +11,27 @@ const parametros: ConsultaParametros = {
     Data: new Date("2026-11-14")
 };
 
-async function consultar(parametros: ConsultaParametros) {
-    const response = await fetch(
-        "http://localhost:3000/api/consulta",
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify(parametros)
-        }
-    );
+ function consultar(parametros: ConsultaParametros) {
+    // const response = await fetch(
+    //     "http://localhost:3000/api/consulta",
+    //     {
+    //         method: "POST",
+    //         headers: {
+    //             "Content-Type": "application/json"
+    //         },
+    //         body: JSON.stringify(parametros)
+    //     }
+    // );
 
-    if (!response.ok) {
-        throw new Error("Erro ao realizar consulta");
-    }
+    // if (!response.ok) {
+    //     throw new Error("Erro ao realizar consulta");
+    // }
 
-    return await response.json();
+    console.log("Consulta realizada com sucesso!");
+    
+    return "testee";
+
+    // return await response.json();
+
 }
 
