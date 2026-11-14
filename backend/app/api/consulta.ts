@@ -10,6 +10,7 @@ export const parametros: ConsultaParametros = {
     Data: new Date("2026-11-14")
 };
 
+/*
 export async function consultar(parametros: ConsultaParametros) {
     const response = await fetch(
         "http://localhost:3000/api/consulta",
@@ -27,4 +28,10 @@ export async function consultar(parametros: ConsultaParametros) {
     }
 
     return await response.json();
+}
+*/
+
+export async function consultar(parametros: ConsultaParametros): Promise<string> {
+    void parametros;
+    return "Texto de teste";
 }
