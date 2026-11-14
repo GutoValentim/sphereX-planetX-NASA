@@ -1,2 +1,3 @@
-// Configuração inicial; adicionar opções durante a implementação.
-export default {};
+import { defineConfig } from 'vite';
+
+export default defineConfig({ envDir: '..', server: { host: '0.0.0.0' } });
