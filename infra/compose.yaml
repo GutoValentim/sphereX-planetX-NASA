@@ -7,8 +7,6 @@ x-runtime: &runtime
   user: "1000:1000"
   read_only: true
   working_dir: /app
-  volumes:
-    - ${SPHEREX_RELEASE_DIR:-/opt/docker/spherex/current}:/app:ro
   tmpfs:
     - /tmp:size=16m,mode=1777
   cap_drop: [ALL]
@@ -28,7 +26,7 @@ services:
     <<: *runtime
     command: ["node", "--env-file=/run/spherex-api.env", "--env-file=/app/.release.env", "backend/dist/api/server.js"]
     volumes:
-      - ${SPHEREX_RELEASE_DIR:-/opt/docker/spherex/current}:/app:ro
+      - ${SPHEREX_API_RELEASE_DIR:-/opt/docker/spherex/current-api}:/app:ro
       - /opt/docker/spherex/api.env:/run/spherex-api.env:ro
     environment:
       NODE_ENV: production
@@ -53,6 +51,8 @@ services:
   frontend:
     <<: *runtime
     command: ["node", "--env-file=/app/.release.env", "frontend/server.mjs"]
+    volumes:
+      - ${SPHEREX_FRONTEND_RELEASE_DIR:-/opt/docker/spherex/current-frontend}:/app:ro
     environment:
       NODE_ENV: production
       PORT: "8080"

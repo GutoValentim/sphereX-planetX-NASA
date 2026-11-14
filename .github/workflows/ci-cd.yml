@@ -11,8 +11,55 @@ permissions:
   contents: read
 
 jobs:
-  ci:
-    name: Lint, types, tests and build
+  changes:
+    name: Detect changed projects
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      infra: ${{ steps.filter.outputs.infra }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          backend=false
+          frontend=false
+          infra=false
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            backend=true
+            frontend=true
+            infra=true
+          elif [[ "$EVENT_NAME" == push ]]; then
+            if [[ -z "$BEFORE" || "$BEFORE" =~ ^0+$ ]]; then
+              changed_files=$(git ls-tree -r --name-only "$GITHUB_SHA")
+            else
+              changed_files=$(git diff --no-renames --name-only "$BEFORE" "$GITHUB_SHA")
+            fi
+            while IFS= read -r file; do
+              case "$file" in
+                backend/*) backend=true ;;
+                frontend/*) frontend=true ;;
+                infra/*) infra=true ;;
+                package.json|package-lock.json|eslint.config.mjs)
+                  backend=true
+                  frontend=true
+                  ;;
+              esac
+            done <<< "$changed_files"
+          fi
+          {
+            echo "backend=$backend"
+            echo "frontend=$frontend"
+            echo "infra=$infra"
+          } >> "$GITHUB_OUTPUT"
+
+  backend-ci:
+    name: Backend validation
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -22,19 +69,47 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
+      - run: npx eslint backend
+      - run: npx tsc --noEmit -p backend/tsconfig.json
+      - run: npx tsx --test backend/tests/*.test.ts
+      - run: npx tsc -p backend/tsconfig.json
 
-  deploy:
-    name: Deploy production
-    needs: ci
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+  frontend-ci:
+    name: Frontend validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npx eslint frontend
+      - run: npm run typecheck --workspace frontend
+      - run: node --test frontend/tests/*.test.mjs
+      - run: npm run build --workspace frontend
+
+  infra-ci:
+    name: Infrastructure validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: bash -n infra/deploy.sh && bash -n infra/ssh-deploy.sh
+      - run: python -m unittest discover -s infra/tests -v
+
+  deploy-api:
+    name: Deploy API
+    needs: [backend-ci, changes]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.changes.outputs.backend == 'true' && needs.changes.outputs.infra != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
-      group: spherex-production
+      group: spherex-api-deploy
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -54,7 +129,71 @@ jobs:
           ssh -i ~/.ssh/spherex -o BatchMode=yes -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
             -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
-            spherex-deploy@150.230.73.212 "deploy $DEPLOY_SHA"
+            spherex-deploy@150.230.73.212 "deploy $DEPLOY_SHA api"
+      - name: Remove deployment key
+        if: always()
+        run: rm -f ~/.ssh/spherex
+
+  deploy-frontend:
+    name: Deploy frontend
+    needs: [frontend-ci, changes]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.changes.outputs.frontend == 'true' && needs.changes.outputs.infra != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: spherex-frontend-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Configure restricted deployment key
+        env:
+          DEPLOY_KEY: ${{ secrets.SPHEREX_SSH_PRIVATE_KEY }}
+        run: |
+          test -n "$DEPLOY_KEY" || { echo "::error::Configure SPHEREX_SSH_PRIVATE_KEY in repository secrets."; exit 1; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/spherex
+          chmod 600 ~/.ssh/spherex
+          install -m 600 infra/ssh_known_hosts ~/.ssh/known_hosts
+      - name: Deploy the tested commit
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
+        run: |
+          ssh -i ~/.ssh/spherex -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+            spherex-deploy@150.230.73.212 "deploy $DEPLOY_SHA frontend"
+      - name: Remove deployment key
+        if: always()
+        run: rm -f ~/.ssh/spherex
+
+  deploy-stack:
+    name: Deploy full stack
+    needs: [backend-ci, frontend-ci, infra-ci, changes]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.changes.outputs.infra == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: spherex-stack-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Configure restricted deployment key
+        env:
+          DEPLOY_KEY: ${{ secrets.SPHEREX_SSH_PRIVATE_KEY }}
+        run: |
+          test -n "$DEPLOY_KEY" || { echo "::error::Configure SPHEREX_SSH_PRIVATE_KEY in repository secrets."; exit 1; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/spherex
+          chmod 600 ~/.ssh/spherex
+          install -m 600 infra/ssh_known_hosts ~/.ssh/known_hosts
+      - name: Deploy the tested commit
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
+        run: |
+          ssh -i ~/.ssh/spherex -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+            spherex-deploy@150.230.73.212 "deploy $DEPLOY_SHA stack"
       - name: Remove deployment key
         if: always()
         run: rm -f ~/.ssh/spherex
