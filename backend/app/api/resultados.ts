@@ -50,7 +50,7 @@ export function createApp({
       const timedOut = error instanceof Error && error.name === 'TimeoutError';
       res.status(timedOut ? 504 : 502).json({ erro: 'Falha na comunicação com FastAPI' });
     }
-  });
+  };
   app.get('/api/consulta', async (req, res) => {
     const { RA, DEC, Data } = req.query;
     const ra = typeof RA === 'string' && RA.trim() ? Number(RA) : Number.NaN;
