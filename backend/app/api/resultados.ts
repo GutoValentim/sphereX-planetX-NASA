@@ -33,9 +33,6 @@ export function createApp({
     res.set('Cache-Control', 'no-store');
     res.json({ status: 'ok', service: 'spherex-api', version: gitSha });
   });
-  app.get('/api/consulta', (_req, res) => {
-    res.type('text/plain').send('Texto de teste');
-  });
   app.post('/api/consulta', async (req, res) => {
     if (!pythonApiUrl) {
       res.status(503).json({ erro: 'Serviço Python ainda não configurado.' });
