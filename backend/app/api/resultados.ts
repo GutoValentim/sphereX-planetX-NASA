@@ -33,10 +33,7 @@ export function createApp({
     res.set('Cache-Control', 'no-store');
     res.json({ status: 'ok', service: 'spherex-api', version: gitSha });
   });
-  app.get('/api/consulta', (_req, res) => {
-    res.type('text/plain').send('Texto de teste');
-  });
-  app.post('/api/consulta', async (req, res) => {
+  const forwardConsulta = async (payload: unknown, res: express.Response) => {
     if (!pythonApiUrl) {
       res.status(503).json({ erro: 'Serviço Python ainda não configurado.' });
       return;
@@ -45,7 +42,7 @@ export function createApp({
       const response = await fetch(new URL('/receber-dados', pythonApiUrl), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(req.body),
+        body: JSON.stringify(payload),
         signal: AbortSignal.timeout(pythonTimeoutMs),
       });
       res.status(response.status).json(await response.json());
@@ -53,6 +50,20 @@ export function createApp({
       const timedOut = error instanceof Error && error.name === 'TimeoutError';
       res.status(timedOut ? 504 : 502).json({ erro: 'Falha na comunicação com FastAPI' });
     }
+  });
+  app.get('/api/consulta', async (req, res) => {
+    const { RA, DEC, Data } = req.query;
+    const ra = typeof RA === 'string' && RA.trim() ? Number(RA) : Number.NaN;
+    const dec = typeof DEC === 'string' && DEC.trim() ? Number(DEC) : Number.NaN;
+    if (!Number.isFinite(ra) || !Number.isFinite(dec) ||
+        typeof Data !== 'string' || !Data.trim() || Number.isNaN(Date.parse(Data))) {
+      res.status(400).json({ erro: 'Informe RA, DEC e Data válidos na query.' });
+      return;
+    }
+    await forwardConsulta({ RA: ra, DEC: dec, Data }, res);
+  });
+  app.post('/api/consulta', async (req, res) => {
+    await forwardConsulta(req.body, res);
   });
   return app;
 }
