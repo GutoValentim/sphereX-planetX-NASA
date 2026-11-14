@@ -49,30 +49,12 @@ test('consultation forwards the request and preserves the Python response status
   assert.equal(response.status, 202);
   assert.deepEqual(await response.json(), { accepted: true });
 });
-test('GET consultation reads parameters from the query and forwards them to Python', async () => {
-  const upstream = await listen(createServer(async (req, res) => {
-    assert.equal(req.url, '/receber-dados');
-    assert.equal(req.method, 'POST');
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) chunks.push(chunk);
-    assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString()), {
-      RA: 215.341667,
-      DEC: -23.55052,
-      Data: '2026-11-14',
-    });
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ accepted: true }));
-  }));
-  const url = await listen(createServer(createApp({ pythonApiUrl: upstream })));
-  const response = await fetch(`${url}/api/consulta?RA=215.341667&DEC=-23.55052&Data=2026-11-14`);
+test('GET consultation displays the CI/CD test text', async () => {
+  const url = await listen(createServer(createApp({ pythonApiUrl: '' })));
+  const response = await fetch(`${url}/api/consulta`);
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { accepted: true });
-});
-test('GET consultation rejects missing or invalid query parameters', async () => {
-  const url = await listen(createServer(createApp({ pythonApiUrl: 'http://127.0.0.1:1' })));
-  const response = await fetch(`${url}/api/consulta?RA=invalid&DEC=-23`);
-  assert.equal(response.status, 400);
-  assert.match((await response.json()).erro, /RA, DEC e Data/);
+  assert.match(response.headers.get('content-type') ?? '', /text\/plain/);
+  assert.equal(await response.text(), 'Texto de teste');
 });
 test('unreachable Python service returns a gateway error', async () => {
   const url = await listen(createServer(createApp({ pythonApiUrl: 'http://127.0.0.1:1' })));

@@ -33,20 +33,10 @@ export function createApp({
     res.set('Cache-Control', 'no-store');
     res.json({ status: 'ok', service: 'spherex-api', version: gitSha });
   });
-  const handleConsulta: express.RequestHandler = async (req, res) => {
-    let payload: unknown = req.body;
-    if (req.method === 'GET') {
-      const { RA, DEC, Data } = req.query;
-      const ra = typeof RA === 'string' ? Number(RA) : Number.NaN;
-      const dec = typeof DEC === 'string' ? Number(DEC) : Number.NaN;
-      if (!Number.isFinite(ra) || !Number.isFinite(dec) ||
-          typeof Data !== 'string' || Number.isNaN(Date.parse(Data))) {
-        res.status(400).json({ erro: 'Informe RA, DEC e Data válidos na query.' });
-        return;
-      }
-      payload = { RA: ra, DEC: dec, Data };
-    }
-
+  app.get('/api/consulta', (_req, res) => {
+    res.type('text/plain').send('Texto de teste');
+  });
+  app.post('/api/consulta', async (req, res) => {
     if (!pythonApiUrl) {
       res.status(503).json({ erro: 'Serviço Python ainda não configurado.' });
       return;
@@ -55,7 +45,7 @@ export function createApp({
       const response = await fetch(new URL('/receber-dados', pythonApiUrl), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(req.body),
         signal: AbortSignal.timeout(pythonTimeoutMs),
       });
       res.status(response.status).json(await response.json());
@@ -63,7 +53,6 @@ export function createApp({
       const timedOut = error instanceof Error && error.name === 'TimeoutError';
       res.status(timedOut ? 504 : 502).json({ erro: 'Falha na comunicação com FastAPI' });
     }
-  };
-  app.route('/api/consulta').get(handleConsulta).post(handleConsulta);
+  });
   return app;
 }
