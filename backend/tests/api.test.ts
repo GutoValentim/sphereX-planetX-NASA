@@ -49,6 +49,13 @@ test('consultation forwards the request and preserves the Python response status
   assert.equal(response.status, 202);
   assert.deepEqual(await response.json(), { accepted: true });
 });
+test('GET consultation returns the test text in the browser', async () => {
+  const url = await listen(createServer(createApp({ pythonApiUrl: '' })));
+  const response = await fetch(`${url}/api/consulta`);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type') ?? '', /text\/plain/);
+  assert.equal(await response.text(), 'Texto de teste');
+});
 test('unreachable Python service returns a gateway error', async () => {
   const url = await listen(createServer(createApp({ pythonApiUrl: 'http://127.0.0.1:1' })));
   const response = await fetch(`${url}/api/consulta`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
