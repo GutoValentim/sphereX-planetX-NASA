@@ -1,0 +1,64 @@
+.workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.main {
+  display: grid;
+  grid-template-columns: minmax(12rem, 15rem) minmax(0, 1fr) auto;
+  grid-template-areas:
+    'bands stage mode'
+    '. timeline .';
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.bands {
+  grid-area: bands;
+}
+
+.mode {
+  grid-area: mode;
+}
+
+.timeline {
+  grid-area: timeline;
+}
+
+.stage {
+  grid-area: stage;
+  position: relative;
+  height: clamp(22rem, 62vh, 40rem);
+  overflow: hidden;
+  color: var(--color-on-viewer);
+  background-color: var(--color-viewer-background);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.view {
+  position: absolute;
+  inset: 0;
+}
+
+/* visibility (not display: none) keeps the hidden view sized, so the map and chart keep a valid layout. */
+.view[hidden] {
+  display: block;
+  visibility: hidden;
+}
+
+@media (max-width: 56rem) {
+  .main {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'mode'
+      'stage'
+      'timeline'
+      'bands';
+  }
+
+  .stage {
+    height: clamp(18rem, 55vh, 28rem);
+  }
+}
