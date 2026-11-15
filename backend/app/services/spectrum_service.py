@@ -26,11 +26,10 @@ from astropy.stats import sigma_clipped_stats
 from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_area
 import numpy as np
-from scipy import ndimage
 
 from app.schemas.observations import ObservationRecord
 from app.services.cutout_cache import CalibrationStore, obtain_cutout
-from app.services.image_aligner import source_wavelength_map
+from app.services.image_aligner import source_wavelength_at
 from app.services.spectral_color import SPHEREX_BANDS, get_spherex_band
 from app.services.spectrum_chart import ChartSeries, render_spectrum_svg
 from app.services.temporal_sequence_service import (
@@ -135,24 +134,35 @@ def measure_spectral_point(
     band = get_spherex_band(observation.bandpass or "")
     with fits.open(fits_path, memmap=False) as hdus:
         image_hdu = hdus["IMAGE"]
-        data = np.asarray(image_hdu.data, dtype=np.float64)
-        variance = (
-            np.asarray(hdus["VARIANCE"].data, dtype=np.float64) if "VARIANCE" in hdus else None
-        )
+        height, width = image_hdu.shape
         wcs = WCS(image_hdu.header).celestial
         x, y = (float(value) for value in wcs.world_to_pixel(
             SkyCoord(ra_deg, dec_deg, unit="deg", frame="icrs")
         ))
-        wavelength = _wavelength_at(hdus, image_hdu, data.shape, x, y)
+        outer = annulus_px[1]
+        if not (outer <= x <= width - 1 - outer and outer <= y <= height - 1 - outer):
+            raise PhotometryRejected("alvo perto da borda do recorte")
+        wavelength = _wavelength_at(hdus, image_hdu, (height, width), x, y)
+        radius = max(aperture_radius_px, outer)
+        x0, x1 = max(0, int(np.floor(x - radius))), min(width, int(np.ceil(x + radius)) + 1)
+        y0, y1 = max(0, int(np.floor(y - radius))), min(height, int(np.ceil(y + radius)) + 1)
+        section = np.s_[y0:y1, x0:x1]
+        # Nos recortes pequenos a leitura contígua é mais barata que os seeks
+        # por linha de .section; nos grandes, não carregamos a imagem toda.
+        def local_pixels(hdu: Any) -> np.ndarray:
+            pixels = hdu.data[section] if height * width <= 64**2 else hdu.section[section]
+            return np.asarray(pixels, dtype=np.float64)
 
-    height, width = data.shape
-    outer = annulus_px[1]
-    if not (outer <= x <= width - 1 - outer and outer <= y <= height - 1 - outer):
-        raise PhotometryRejected("alvo perto da borda do recorte")
+        data = local_pixels(image_hdu)
+        variance = (
+            local_pixels(hdus["VARIANCE"])
+            if "VARIANCE" in hdus else None
+        )
+
     if wavelength is None or not np.isfinite(wavelength):
         raise PhotometryRejected("sem comprimento de onda (WCS-WAVE) na posição")
 
-    yy, xx = np.indices(data.shape)
+    yy, xx = np.ogrid[y0:y1, x0:x1]
     distance = np.hypot(xx - x, yy - y)
     aperture = distance <= aperture_radius_px
     annulus = (distance >= annulus_px[0]) & (distance <= annulus_px[1])
@@ -189,11 +199,7 @@ def measure_spectral_point(
 def _wavelength_at(
     hdus: fits.HDUList, image_hdu: Any, shape: tuple[int, int], x: float, y: float
 ) -> float | None:
-    wavelength = source_wavelength_map(hdus, image_hdu, shape)
-    if wavelength is None:
-        return None
-    value = ndimage.map_coordinates(wavelength, [[y], [x]], order=1, mode="nearest")[0]
-    return float(value) if np.isfinite(value) else None
+    return source_wavelength_at(hdus, image_hdu, shape, x, y)
 
 
 def flag_outliers(points: Sequence[SpectralPoint], window: int = 7) -> set[str]:

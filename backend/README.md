@@ -104,6 +104,12 @@ No FastAPI, `POST /receber-dados` com `elemento: "espectro"` inicia um job
 `output: "spectrum"`); `GET /espectros/<id>` acompanha e
 `GET /espectros/arquivos/...svg` serve os gráficos. Contrato em `docs/api.md`.
 
+A fotometria processa apenas a janela da abertura e do anel de fundo; λ é
+interpolado dos quatro pixels vizinhos, com a mesma precisão do mapa completo.
+Todas as observações continuam sendo medidas. Para comparar desempenho e
+experimentar limites de visitas usando apenas FITS locais, veja
+[`dev/benchmarks/README.md`](../dev/benchmarks/README.md).
+
 Limitações: sem propagação de movimento próprio (alvos rápidos saem da
 abertura), sem correção de abertura (valor absoluto alguns % abaixo; forma
 preservada) e FLAGS não usadas até termos a tabela oficial de bits.
