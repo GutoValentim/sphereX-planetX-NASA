@@ -2,8 +2,6 @@ export interface HomeSectionCopy {
   id: string;
   title: string;
   paragraphs: readonly string[];
-  /** Provisional copy, shown with a "Draft" tag until the team provides the final text. */
-  isDraft: boolean;
 }
 
 export type ExplorerFeatureExample = 'image' | 'chart';

@@ -15,7 +15,10 @@
 }
 
 .bands {
+  display: flex;
+  flex-direction: column;
   grid-area: bands;
+  gap: var(--space-3);
 }
 
 .mode {
@@ -83,12 +86,16 @@
   min-height: 0;
 }
 
-/* Hidden sources keep their size (Aladin needs a laid-out canvas) without taking space. */
+/* Hidden sources keep their size (Aladin needs a laid-out canvas) without taking space.
+   The shift also contains Aladin's reticle, which sets its own visibility and would otherwise
+   stay painted on top of the SPHEREx image. */
 .sourceView[hidden] {
   position: absolute;
   inset: 0;
   display: block;
   visibility: hidden;
+  pointer-events: none;
+  transform: translateX(-100%);
 }
 
 @media (max-width: 56rem) {

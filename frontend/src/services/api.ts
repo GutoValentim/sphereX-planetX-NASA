@@ -100,10 +100,22 @@ interface ConsultationResponse {
   sequencia?: { status_url: string; job: SequenceSnapshot };
 }
 
-export async function startImageSequence(query: ObservationQuery, signal?: AbortSignal) {
+export type ImageColorMode = 'falsa' | 'mono';
+
+export async function startImageSequence(
+  query: ObservationQuery,
+  signal?: AbortSignal,
+  color: ImageColorMode = 'falsa',
+) {
   const body = await requestJson<ConsultationResponse>(
     // "balanceada": up to 12 epochs spread over the mission, so the timeline shows real change.
-    consultationPath(query, { elemento: 'imagem', referencia: referenceBand(query.band), modo: 'balanceada' }),
+    // "mono" is cached separately from the false-color frames, so switching back does not re-render.
+    consultationPath(query, {
+      elemento: 'imagem',
+      referencia: referenceBand(query.band),
+      modo: 'balanceada',
+      cor: color,
+    }),
     signal,
   );
   if (!body.sequencia) throw new ApiError('The API did not return an image sequence.', 502);

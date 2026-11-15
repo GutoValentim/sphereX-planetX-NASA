@@ -1,4 +1,5 @@
 import Button from '../common/Button';
+import { BAND_DISPLAY_COLOR } from '../../constants/spectralBands';
 import type { SpectralBandId, SpectralBandOption } from '../../types/observation';
 import styles from './SpectralBandPanel.module.css';
 
@@ -47,7 +48,15 @@ function SpectralBandPanel({
               checked={selectedBandIds.includes(band.id)}
               onChange={() => onToggle(band.id)}
             />
-            <span>{band.label}</span>
+            <span className={styles.label}>{band.label}</span>
+            {BAND_DISPLAY_COLOR[band.id] && (
+              <span
+                className={styles.swatch}
+                style={{ backgroundColor: BAND_DISPLAY_COLOR[band.id] }}
+                title={`${band.id} display color`}
+                aria-hidden="true"
+              />
+            )}
           </label>
         ))}
       </fieldset>

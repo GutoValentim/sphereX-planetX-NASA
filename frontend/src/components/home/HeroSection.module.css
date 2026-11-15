@@ -29,7 +29,7 @@
 
 .title {
   margin: 0;
-  font-size: var(--font-size-display);
+  font-size: clamp(3rem, 3rem + 4vw, 5rem);
   font-weight: var(--font-weight-bold);
   line-height: var(--line-height-tight);
 }
@@ -46,4 +46,11 @@
   flex-wrap: wrap;
   justify-content: center;
   gap: var(--space-3);
+}
+
+.brand {
+  margin: 0;
+  font-size: clamp(3rem, 1rem + 2vw, 4.5rem);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
 }
