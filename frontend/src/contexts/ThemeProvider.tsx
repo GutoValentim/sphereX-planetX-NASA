@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ThemeContext } from './ThemeContext';
-import type { Theme } from '../types/theme';
+import type { Theme, ThemePreference } from '../types/theme';
 import {
-  readStoredTheme,
-  resolveInitialTheme,
-  storeTheme,
+  getSystemTheme,
+  readStoredPreference,
+  storePreference,
   subscribeToSystemTheme,
 } from '../utils/themePreference';
 import { applyTheme, applyThemeWithTransition } from '../utils/themeTransition';
@@ -14,8 +14,9 @@ interface ThemeProviderProps {
 }
 
 function ThemeProvider({ children }: ThemeProviderProps) {
-  const [theme, setTheme] = useState<Theme>(resolveInitialTheme);
-  const [hasUserPreference, setHasUserPreference] = useState(() => readStoredTheme() !== null);
+  const [preference, setPreferenceState] = useState<ThemePreference>(readStoredPreference);
+  const [systemTheme, setSystemTheme] = useState<Theme>(getSystemTheme);
+  const theme: Theme = preference === 'system' ? systemTheme : preference;
 
   const isInitialTheme = useRef(true);
 
@@ -28,19 +29,19 @@ function ThemeProvider({ children }: ThemeProviderProps) {
     applyThemeWithTransition(theme);
   }, [theme]);
 
-  useEffect(() => {
-    if (hasUserPreference) return undefined;
-    return subscribeToSystemTheme(setTheme);
-  }, [hasUserPreference]);
+  useEffect(() => subscribeToSystemTheme(setSystemTheme), []);
 
-  const toggleTheme = useCallback(() => {
-    const nextTheme: Theme = theme === 'dark' ? 'light' : 'dark';
-    storeTheme(nextTheme);
-    setHasUserPreference(true);
-    setTheme(nextTheme);
-  }, [theme]);
-
-  const value = useMemo(() => ({ theme, toggleTheme }), [theme, toggleTheme]);
+  const value = useMemo(
+    () => ({
+      theme,
+      preference,
+      setPreference: (next: ThemePreference) => {
+        storePreference(next);
+        setPreferenceState(next);
+      },
+    }),
+    [theme, preference],
+  );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

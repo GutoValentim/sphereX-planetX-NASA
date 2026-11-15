@@ -1,0 +1,60 @@
+.iconButton {
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  padding: 0;
+  border: var(--border-width) solid transparent;
+  transition:
+    background-color var(--duration-fast) var(--easing-standard),
+    border-color var(--duration-fast) var(--easing-standard),
+    color var(--duration-fast) var(--easing-standard);
+}
+
+.iconButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.md {
+  width: var(--icon-button-size);
+  height: var(--icon-button-size);
+}
+
+.sm {
+  width: var(--icon-button-size-sm);
+  height: var(--icon-button-size-sm);
+}
+
+.square {
+  border-radius: var(--radius-control);
+}
+
+.circle {
+  border-radius: var(--radius-full);
+}
+
+.secondary {
+  color: var(--color-text-primary);
+  background-color: var(--color-surface);
+  border-color: var(--color-border-strong);
+}
+
+.secondary:hover:not(:disabled) {
+  background-color: var(--color-surface-muted);
+}
+
+.ghost {
+  color: var(--color-text-secondary);
+  background-color: transparent;
+}
+
+.ghost:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background-color: var(--color-surface-muted);
+}
+
+.iconButton[aria-pressed='true'] {
+  color: var(--color-interactive);
+  background-color: var(--color-interactive-subtle);
+  border-color: var(--color-interactive);
+}

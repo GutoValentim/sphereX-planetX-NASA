@@ -1,14 +1,16 @@
+/* The dashed border marks provisional content (drafts, demo values) without relying on color. */
 .tag {
   display: inline-flex;
   align-items: center;
+  min-height: 1.5rem;
   padding: 0 var(--space-2);
-  font-family: var(--font-body);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-bold);
-  letter-spacing: 0.04em;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-label);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--letter-spacing-label);
   text-transform: uppercase;
-  color: var(--color-text);
-  background-color: color-mix(in srgb, var(--color-accent) 14%, transparent);
-  border: var(--border-width) dashed var(--color-accent);
-  border-radius: var(--radius-full);
+  color: var(--color-text-primary);
+  background-color: var(--color-warning-subtle);
+  border: var(--border-width) dashed var(--color-warning);
+  border-radius: var(--radius-sm);
 }

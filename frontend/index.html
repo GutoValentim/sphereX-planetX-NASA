@@ -15,6 +15,7 @@
         try {
           var stored = localStorage.getItem('sky-explorer-theme');
           var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          // 'system' or a missing value follows the OS color scheme.
           var theme = stored === 'light' || stored === 'dark' ? stored : prefersDark ? 'dark' : 'light';
           document.documentElement.dataset.theme = theme;
         } catch (error) {
