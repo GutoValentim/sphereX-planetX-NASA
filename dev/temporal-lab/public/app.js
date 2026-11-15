@@ -41,7 +41,6 @@ const elements = {
   colorSwatch: $("#colorSwatch"),
   previous: $("#previousButton"),
   next: $("#nextButton"),
-  clearDataset: $("#clearDatasetButton"),
   tabs: {
     explore: [$("#exploreTabButton"), $("#exploreTab")],
     history: [$("#historyTabButton"), $("#historyTab")],
@@ -72,13 +71,6 @@ const elements = {
   spectrumCombined: $("#spectrumCombined"),
   spectrumCombinedImage: $("#spectrumCombinedImage"),
   spectrumBands: $("#spectrumBands"),
-  confirmDialog: $("#confirmDialog"),
-  confirmTitle: $("#confirmTitle"),
-  confirmText: $("#confirmText"),
-  confirmOptionRow: $("#confirmOptionRow"),
-  confirmOption: $("#confirmOption"),
-  confirmOptionText: $("#confirmOptionText"),
-  confirmButton: $("#confirmButton"),
   mapDialog: $("#mapDialog"),
   mapLead: $("#mapLead"),
   mapFovOptions: $("#mapFovOptions"),
@@ -730,7 +722,6 @@ function renderRecordCard(record) {
       : actionButton("Mapear…", "ghost-button compact", () => openMapDialog(record)),
     actionButton("Exportar", "ghost-button compact", () => exportRecord(record), busy),
     actionButton("Editar", "ghost-button compact", () => { state.editing = record.id; renderHistory(); }),
-    actionButton("Apagar…", "ghost-button compact danger", () => deleteRecord(record), busy),
   );
   footer.append(meta, actions);
   card.append(footer);
@@ -820,46 +811,6 @@ async function exportRecord(record) {
   try {
     const result = await api(`/api/records/${record.id}/export?engine=${encodeURIComponent(state.engine)}`, { method: "POST" });
     window.open(`/exports/${result.path}/manifest.json`, "_blank", "noopener");
-  } catch (error) {
-    setMessage(error.message, true);
-    switchTab("explore");
-  }
-}
-
-function confirmAction({ title, html, confirmText = "Apagar", option = null }) {
-  elements.confirmTitle.textContent = title;
-  elements.confirmText.replaceChildren(...html);
-  elements.confirmButton.textContent = confirmText;
-  elements.confirmOptionRow.hidden = !option;
-  elements.confirmOption.checked = false;
-  if (option) elements.confirmOptionText.textContent = option;
-  elements.confirmDialog.returnValue = "cancel";
-  elements.confirmDialog.showModal();
-  return new Promise((resolve) => {
-    elements.confirmDialog.addEventListener("close", () => {
-      resolve(elements.confirmDialog.returnValue === "confirm"
-        ? { confirmed: true, option: elements.confirmOption.checked }
-        : { confirmed: false });
-    }, { once: true });
-  });
-}
-
-async function deleteRecord(record) {
-  const engine = state.engines.find((item) => item.id === state.engine);
-  const { confirmed, option } = await confirmAction({
-    title: `Apagar “${record.name || "registro sem nome"}”?`,
-    html: [
-      el("p", null, `Remove do motor ${engine ? engineLabel(engine) : state.engine} os FITS, as imagens renderizadas, os espectros e a exportação deste alvo.`),
-      el("p", "modal-coords", coordinateText(record)),
-      el("p", "modal-warning", "Esta ação não pode ser desfeita. Os dados de outras versões do motor são preservados."),
-    ],
-    confirmText: "Apagar cache",
-    option: "Remover também o registro (nome e descrição) do acervo",
-  });
-  if (!confirmed) return;
-  try {
-    await api(`/api/records/${record.id}?engine=${encodeURIComponent(state.engine)}${option ? "&forget=1" : ""}`, { method: "DELETE" });
-    await loadRecords();
   } catch (error) {
     setMessage(error.message, true);
     switchTab("explore");
@@ -1360,33 +1311,6 @@ elements.historyFilter.querySelectorAll("button").forEach((button) => {
     });
     renderHistory();
   });
-});
-
-elements.clearDataset.addEventListener("click", async () => {
-  if (!state.dataset) return;
-  const bands = state.dataset.datasets.map((dataset) => shortBand(dataset.bandpass)).join(", ");
-  const { confirmed } = await confirmAction({
-    title: "Apagar o cache desta composição?",
-    html: [
-      el("p", null, `Remove do motor ${state.engine} os FITS e as imagens das bandas ${bands} nesta janela de ${arcmin(state.dataset.fov_arcmin)}.`),
-      el("p", "modal-warning", "Esta ação não pode ser desfeita. Outras janelas, o espectro e o registro são preservados."),
-    ],
-    confirmText: "Apagar cache",
-  });
-  if (!confirmed) return;
-  try {
-    const results = await Promise.all(
-      state.dataset.datasets.map((dataset) => api(enginePath(`/cache/${dataset.request_id}`), { method: "DELETE" })),
-    );
-    const removed = results.reduce((sum, result) => sum + result.removed, 0);
-    state.loaded.clear();
-    state.lastQuery = null;
-    elements.viewer.hidden = true;
-    setMessage(`${removed} datasets removidos do cache do motor ${state.engine}.`);
-    loadRecords().catch(() => {});
-  } catch (error) {
-    setMessage(error.message, true);
-  }
 });
 
 // -------------------------------------------------------------- inicialização

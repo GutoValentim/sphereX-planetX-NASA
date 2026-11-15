@@ -57,6 +57,9 @@ DATA_ROOT = Path(
 ).expanduser()
 LEGACY_CACHE = os.environ.get("SPHEREX_LAB_CACHE_DIR")
 ENGINE_BASE_PORT = int(os.environ.get("SPHEREX_LAB_ENGINE_BASE_PORT", "8800"))
+# Apagar registros ou caches perde horas de download do IRSA: desativado, salvo liberação explícita.
+ALLOW_DELETE = os.environ.get("SPHEREX_LAB_ALLOW_DELETE") == "1"
+DELETE_DISABLED = "Apagar dados está desativado no laboratório para não perder mapeamentos."
 FOV_OPTIONS = (10.0, 15.0, 20.0, 30.0, 40.0)
 SAMPLINGS = ("native", "2x")
 THEMES = ("dark", "light")
@@ -773,6 +776,9 @@ class LabHandler(BaseHTTPRequestHandler):
                 record_id, name=payload.get("name"), description=payload.get("description")
             ))
         elif method == "DELETE" and len(rest) == 1:
+            if not ALLOW_DELETE:
+                self._send_error(HTTPStatus.FORBIDDEN, DELETE_DISABLED)
+                return
             engine_id = self._engine_id(query)
             if QUEUE.is_busy(record_id):
                 raise RuntimeError("Cancele o mapeamento deste registro antes de apagá-lo.")
@@ -801,6 +807,9 @@ class LabHandler(BaseHTTPRequestHandler):
             self._send_error(HTTPStatus.NOT_FOUND, "Endpoint não encontrado.")
 
     def _proxy(self, method: str, engine_id: str, rest: str, raw_query: str) -> None:
+        if method == "DELETE" and not ALLOW_DELETE:
+            self._send_error(HTTPStatus.FORBIDDEN, DELETE_DISABLED)
+            return
         REGISTRY.get(engine_id)
         allowed = (
             (method == "POST" and rest in {"datasets", "composites"})

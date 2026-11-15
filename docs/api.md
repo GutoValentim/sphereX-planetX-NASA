@@ -37,7 +37,7 @@ Ambos os métodos encaminham a consulta para o serviço Python e repassam o stat
 
 Somente leitura, servido a partir das exportações do laboratório (`dev/temporal-lab`), montadas na API em `SPHEREX_CATALOG_DIR` (produção: `/opt/docker/spherex/lab/exports` → `/catalog:ro`). Sem `SPHEREX_CATALOG_DIR`, as rotas respondem 503.
 
-- `GET /api/catalogo/index.json`: `{ "schema": "spherex-catalog/1", "targets": [ { "id", "slug", "name", "description", "ra_deg", "dec_deg", "manifest", "sequences", "spectrum_themes", "exported_at", "engine" } ] }`. Junta os motores (`v1`, `v2`…); para cada alvo vale a exportação do motor mais novo. Ordenado por nome; `Cache-Control: max-age=30`.
+- `GET /api/catalogo/index.json`: `{ "schema": "spherex-catalog/1", "targets": [ { "id", "slug", "name", "description", "ra_deg", "dec_deg", "manifest", "sequences", "spectrum_themes", "exported_at", "engine" } ] }`. Junta os motores (`v1`, `v2`…). Para cada alvo vale o motor mais novo cuja exportação está 100% pronta (todas as sequências com as seis bandas, nenhuma omitida, e espectro D1–D6 nos temas escuro e claro); se nenhuma está completa, fica a do motor mais antigo. Assim um motor novo nunca substitui em produção um alvo com dados parciais. Ordenado por nome; `Cache-Control: max-age=30`.
 - `GET /api/catalogo/<slug>/manifest.json`: manifesto `spherex-lab-target/1` (ver `dev/temporal-lab/README.md`): `sequences[].frames[].layers[]` no formato de `/api/sequencias/<id>` e `spectrum.dark|light` no formato de `/api/espectros/<id>`. As URLs dentro dele são relativas à pasta do alvo.
 - `GET /api/catalogo/<slug>/<caminho>`: arquivos do alvo (`.webp`, `.svg`, `.json`) do mesmo motor do manifesto. Caminhos fora do padrão → 404.
 
