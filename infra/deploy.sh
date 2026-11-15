@@ -3,16 +3,21 @@ set -euo pipefail
 umask 022
 base=/opt/docker/spherex
 repo=https://github.com/GutoValentim/sphereX-planetX-NASA.git
+node_image=node:24-bookworm-slim
+python_image=python:3.12-slim-bookworm
+components=(api frontend python)
 sha=${1:-}
 scope=${2:-stack}
-[[ $# -ge 1 && $# -le 2 && $sha =~ ^[0-9a-f]{40}$ && $scope =~ ^(api|frontend|stack)$ ]] || {
-  echo "Usage: spherex-deploy <commit SHA> [api|frontend|stack]" >&2
+[[ $# -ge 1 && $# -le 2 && $sha =~ ^[0-9a-f]{40}$ && $scope =~ ^(api|frontend|python|stack)$ ]] || {
+  echo "Usage: spherex-deploy <commit SHA> [api|frontend|python|stack]" >&2
   exit 2
 }
 [[ $EUID == 0 ]] || { echo "Run as root." >&2; exit 2; }
 exec 9>"$base/deploy.lock"
 flock -w 900 9
-mkdir -p "$base/releases/api" "$base/releases/frontend"
+for component in "${components[@]}"; do
+  mkdir -p "$base/releases/$component"
+done
 if [[ ! -d $base/repository.git ]]; then
   git clone --bare "$repo" "$base/repository.git"
 fi
@@ -23,15 +28,22 @@ if [[ $sha != "$latest" && ${SPHEREX_ALLOW_ROLLBACK:-0} != 1 ]]; then
   changed_files=$(git --git-dir="$base/repository.git" diff --no-renames --name-only "$sha" "$latest")
   superseded=false
   while IFS= read -r file; do
+    # Mesma classificação usada pelo job "changes" do CI.
     case "$file" in
+      backend/*.py|backend/requirements*.txt)
+        if [[ $scope == python || $scope == stack ]]; then superseded=true; fi
+        ;;
       backend/*)
         if [[ $scope == api || $scope == stack ]]; then superseded=true; fi
         ;;
       frontend/*)
         if [[ $scope == frontend || $scope == stack ]]; then superseded=true; fi
         ;;
-      infra/*|package.json|package-lock.json|eslint.config.mjs)
+      infra/*)
         superseded=true
+        ;;
+      package.json|package-lock.json|eslint.config.mjs)
+        if [[ $scope != python ]]; then superseded=true; fi
         ;;
     esac
   done <<< "$changed_files"
@@ -65,20 +77,35 @@ build_release() {
     rm -rf -- "$staging"
     return 1
   fi
-  if ! docker run --rm --name "spherex-build-$component-${sha:0:12}" \
-    --memory 1g --cpus 1 --pids-limit 256 \
-    -e "BUILD_COMPONENT=$component" \
-    -e "VITE_API_BASE_URL=https://$api_domain" \
-    -v "$staging:/app" -w /app node:24-bookworm-slim \
-    sh -ec '
-      npm ci --no-audit --no-fund
-      if [ "$BUILD_COMPONENT" = api ]; then
-        npx tsc -p backend/tsconfig.json
-      else
-        npm run build --workspace frontend
-      fi
-      npm prune --omit=dev --no-audit --no-fund
-    '; then
+  local built=0
+  if [[ $component == python ]]; then
+    # O venv é criado em /app, o mesmo caminho em que a release é montada em produção.
+    docker run --rm --name "spherex-build-$component-${sha:0:12}" \
+      --memory 2g --cpus 1 --pids-limit 256 \
+      -v "$staging:/app" -w /app "$python_image" \
+      sh -ec '
+        python -m venv /app/.venv
+        /app/.venv/bin/pip install --no-cache-dir --disable-pip-version-check \
+          -r backend/requirements.txt
+        /app/.venv/bin/python -m compileall -q backend/app
+      ' && built=1
+  else
+    docker run --rm --name "spherex-build-$component-${sha:0:12}" \
+      --memory 1g --cpus 1 --pids-limit 256 \
+      -e "BUILD_COMPONENT=$component" \
+      -e "VITE_API_BASE_URL=https://$api_domain" \
+      -v "$staging:/app" -w /app "$node_image" \
+      sh -ec '
+        npm ci --no-audit --no-fund
+        if [ "$BUILD_COMPONENT" = api ]; then
+          npx tsc -p backend/tsconfig.json
+        else
+          npm run build --workspace frontend
+        fi
+        npm prune --omit=dev --no-audit --no-fund
+      ' && built=1
+  fi
+  if ((!built)); then
     rm -rf -- "$staging"
     return 1
   fi
@@ -94,15 +121,21 @@ build_release() {
 }
 
 if [[ $scope == stack ]]; then
-  build_release api
-  build_release frontend
+  services=("${components[@]}")
 else
-  build_release "$scope"
+  services=("$scope")
 fi
+for service in "${services[@]}"; do
+  build_release "$service"
+done
 
 [[ -f $base/api.env ]] || install -m 600 /dev/null "$base/api.env"
 chown 1000:1000 "$base/api.env"
 chmod 600 "$base/api.env"
+# Cache gravável do serviço Python (FITS, manifestos e frames regeneráveis).
+mkdir -p "$base/cache"
+chown 1000:1000 "$base/cache"
+chmod 750 "$base/cache"
 
 resolve_release_link() {
   local release=
@@ -114,44 +147,45 @@ resolve_release_link() {
   fi
 }
 
+upper() { printf '%s' "$1" | tr '[:lower:]' '[:upper:]'; }
+# Compatível com bash 3.2 (macOS): variáveis previous_<serviço> em vez de arrays associativos.
+previous() { local name="previous_$1"; printf '%s' "${!name}"; }
+previous_sha() { local name="previous_sha_$1"; printf '%s' "${!name}"; }
+
 legacy_release=$(resolve_release_link "$base/current")
-previous_api=$(resolve_release_link "$base/current-api")
-previous_api=${previous_api:-$legacy_release}
-previous_frontend=$(resolve_release_link "$base/current-frontend")
-previous_frontend=${previous_frontend:-$legacy_release}
-previous_api_sha=
-previous_frontend_sha=
-if [[ -n $previous_api && -f $previous_api/.release.env ]]; then
-  previous_api_sha=$(sed -n 's/^GIT_SHA=//p' "$previous_api/.release.env")
-fi
-if [[ -n $previous_frontend && -f $previous_frontend/.release.env ]]; then
-  previous_frontend_sha=$(sed -n 's/^GIT_SHA=//p' "$previous_frontend/.release.env")
-fi
+for component in "${components[@]}"; do
+  release=$(resolve_release_link "$base/current-$component")
+  if [[ $component != python && -z $release ]]; then
+    release=$legacy_release
+  fi
+  release_sha=
+  if [[ -n $release && -f $release/.release.env ]]; then
+    release_sha=$(sed -n 's/^GIT_SHA=//p' "$release/.release.env")
+  fi
+  printf -v "previous_$component" '%s' "$release"
+  printf -v "previous_sha_$component" '%s' "$release_sha"
+done
 
 if [[ $scope != stack ]]; then
-  [[ -f $base/.env && -f $base/compose.yaml &&
-     -L $base/current-api && -L $base/current-frontend ]] || {
+  [[ -f $base/.env && -f $base/compose.yaml && -L $base/current-$scope ]] || {
     echo "A successful stack deployment is required before service-only deployments." >&2
     exit 2
   }
-  grep -q '^SPHEREX_API_RELEASE_DIR=' "$base/.env" &&
-    grep -q '^SPHEREX_FRONTEND_RELEASE_DIR=' "$base/.env" || {
-      echo "The active environment does not support independent service releases; deploy the stack first." >&2
-      exit 2
-    }
+  release_var="SPHEREX_$(upper "$scope")_RELEASE_DIR"
+  grep -q "^$release_var=" "$base/.env" || {
+    echo "The active environment does not support independent $scope releases; deploy the stack first." >&2
+    exit 2
+  }
 fi
 
-if [[ $scope == stack ]]; then
-  services=(api frontend)
-else
-  services=("$scope")
-fi
-api_release="$base/releases/api/$sha"
-frontend_release="$base/releases/frontend/$sha"
 backup=$(mktemp -d "$base/.rollback.XXXXXX")
 [[ ! -f $base/.env ]] || cp "$base/.env" "$backup/.env"
 [[ ! -f $base/compose.yaml ]] || cp "$base/compose.yaml" "$backup/compose.yaml"
-for marker in api-current-sha frontend-current-sha current-sha; do
+markers=(current-sha)
+for component in "${components[@]}"; do
+  markers+=("$component-current-sha")
+done
+for marker in "${markers[@]}"; do
   [[ ! -f $base/$marker ]] || cp "$base/$marker" "$backup/$marker"
 done
 
@@ -173,17 +207,19 @@ restore_release() {
   fi
 }
 
+compose() {
+  docker compose --project-name spherex --env-file "$base/.env" -f "$base/compose.yaml" "$@"
+}
+
 deploy_services() {
-  docker compose --project-name spherex --env-file "$base/.env" \
-    -f "$base/compose.yaml" up -d --force-recreate --wait --wait-timeout 120 "$@"
+  compose up -d --force-recreate --wait --wait-timeout 120 "$@"
 }
 
 verify_release() {
   local service=$1
   local expected_sha=$2
   local id
-  id=$(docker compose --project-name spherex --env-file "$base/.env" \
-    -f "$base/compose.yaml" ps -q "$service")
+  id=$(compose ps -q "$service")
   [[ -n $id ]] || return 1
   local healthy=0
   for ((attempt=0; attempt<40; attempt++)); do
@@ -194,9 +230,14 @@ verify_release() {
     sleep 2
   done
   [[ $healthy == 1 ]] || return 1
-  docker exec -e "EXPECTED_GIT_SHA=$expected_sha" "$id" node \
-    --env-file=/app/.release.env \
-    -e 'fetch("http://127.0.0.1:"+process.env.PORT+"/healthz").then(async r=>{if(!r.ok||(await r.json()).version!==process.env.EXPECTED_GIT_SHA)process.exit(1)}).catch(()=>process.exit(1))'
+  if [[ $service == python ]]; then
+    docker exec -e "EXPECTED_GIT_SHA=$expected_sha" "$id" /app/.venv/bin/python -c \
+      'import json,os,urllib.request; r=json.load(urllib.request.urlopen("http://127.0.0.1:8000/healthz", timeout=5)); raise SystemExit(r.get("version") != os.environ["EXPECTED_GIT_SHA"])'
+  else
+    docker exec -e "EXPECTED_GIT_SHA=$expected_sha" "$id" node \
+      --env-file=/app/.release.env \
+      -e 'fetch("http://127.0.0.1:"+process.env.PORT+"/healthz").then(async r=>{if(!r.ok||(await r.json()).version!==process.env.EXPECTED_GIT_SHA)process.exit(1)}).catch(()=>process.exit(1))'
+  fi
 }
 
 rollback() {
@@ -204,6 +245,20 @@ rollback() {
   trap - EXIT
   if ((status != 0)); then
     echo "Deploy failed; restoring the previous spherex release." >&2
+    local restorable=() discard=()
+    for service in "${services[@]}"; do
+      if [[ -n $(previous "$service") && -n $(previous_sha "$service") ]]; then
+        restorable+=("$service")
+      else
+        discard+=("$service")
+      fi
+    done
+    # Serviços sem release anterior (ex.: primeiro deploy do Python) são removidos
+    # com o compose candidato, antes de restaurar o compose anterior.
+    if ((${#discard[@]})); then
+      compose rm -sf "${discard[@]}" >/dev/null 2>&1 ||
+        echo "Could not remove new services: ${discard[*]}" >&2
+    fi
     if [[ $scope == stack ]]; then
       if [[ -f $backup/.env ]]; then cp "$backup/.env" "$base/.env"; else rm -f -- "$base/.env"; fi
       if [[ -f $backup/compose.yaml ]]; then
@@ -212,7 +267,7 @@ rollback() {
         rm -f -- "$base/compose.yaml"
       fi
     fi
-    for marker in api-current-sha frontend-current-sha current-sha; do
+    for marker in "${markers[@]}"; do
       if [[ -f $backup/$marker ]]; then
         cp "$backup/$marker" "$base/$marker"
       else
@@ -220,24 +275,14 @@ rollback() {
       fi
     done
 
-    local rollback_possible=1
     for service in "${services[@]}"; do
-      if [[ $service == api ]]; then
-        restore_release api "$previous_api"
-        [[ -n $previous_api && -n $previous_api_sha ]] || rollback_possible=0
-      else
-        restore_release frontend "$previous_frontend"
-        [[ -n $previous_frontend && -n $previous_frontend_sha ]] || rollback_possible=0
-      fi
+      restore_release "$service" "$(previous "$service")"
     done
-    if ((rollback_possible)); then
-      if deploy_services "${services[@]}"; then
-        for service in "${services[@]}"; do
-          if [[ $service == api ]]; then
-            verify_release api "$previous_api_sha" || echo "API rollback healthcheck failed." >&2
-          else
-            verify_release frontend "$previous_frontend_sha" || echo "Frontend rollback healthcheck failed." >&2
-          fi
+    if ((${#restorable[@]})); then
+      if deploy_services "${restorable[@]}"; then
+        for service in "${restorable[@]}"; do
+          verify_release "$service" "$(previous_sha "$service")" ||
+            echo "$service rollback healthcheck failed." >&2
         done
       else
         echo "Automatic rollback failed; inspect the spherex stack." >&2
@@ -252,24 +297,21 @@ rollback() {
 trap rollback EXIT
 
 if [[ $scope == stack ]]; then
-  install -m 644 "$api_release/infra/compose.yaml" "$base/compose.yaml"
+  install -m 644 "$base/releases/api/$sha/infra/compose.yaml" "$base/compose.yaml"
   {
-    printf 'SPHEREX_API_RELEASE_DIR=%s/current-api\n' "$base"
-    printf 'SPHEREX_FRONTEND_RELEASE_DIR=%s/current-frontend\n' "$base"
+    for component in "${components[@]}"; do
+      printf 'SPHEREX_%s_RELEASE_DIR=%s/current-%s\n' "$(upper "$component")" "$base" "$component"
+    done
     printf 'FRONTEND_DOMAIN=%s\nAPI_DOMAIN=%s\n' "$frontend_domain" "$api_domain"
   } > "$base/.env.next"
   chmod 600 "$base/.env.next"
   mv "$base/.env.next" "$base/.env"
 fi
 
-docker compose --project-name spherex --env-file "$base/.env" \
-  -f "$base/compose.yaml" config -q
-if [[ $scope == stack || $scope == api ]]; then
-  switch_release api "$api_release"
-fi
-if [[ $scope == stack || $scope == frontend ]]; then
-  switch_release frontend "$frontend_release"
-fi
+compose config -q
+for service in "${services[@]}"; do
+  switch_release "$service" "$base/releases/$service/$sha"
+done
 deploy_services "${services[@]}"
 for service in "${services[@]}"; do
   verify_release "$service" "$sha"
@@ -278,16 +320,16 @@ for service in "${services[@]}"; do
   printf '%s\n' "$sha" > "$base/$service-current-sha"
 done
 
-if [[ $scope == stack || $scope == api ]]; then
-  current_api=$(readlink -f "$base/current-api")
-  python3 - "$base/releases/api" "$current_api" "$previous_api" <<'PY'
+for service in "${services[@]}"; do
+  current=$(readlink -f "$base/current-$service")
+  python3 - "$base/releases/$service" "$current" "$(previous "$service")" <<'PY'
 from pathlib import Path
 import re
 import shutil
 import sys
 
-root, current, previous = map(Path, sys.argv[1:])
-protected = {current, previous}
+root, current, previous = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+protected = {current} | ({Path(previous)} if previous else set())
 releases = sorted(
     (path for path in root.iterdir() if path.is_dir() and re.fullmatch(r"[0-9a-f]{40}", path.name)),
     key=lambda path: path.stat().st_mtime,
@@ -296,25 +338,6 @@ releases = sorted(
 for path in [path for path in releases if path not in protected][3:]:
     shutil.rmtree(path)
 PY
-fi
-if [[ $scope == stack || $scope == frontend ]]; then
-  current_frontend=$(readlink -f "$base/current-frontend")
-  python3 - "$base/releases/frontend" "$current_frontend" "$previous_frontend" <<'PY'
-from pathlib import Path
-import re
-import shutil
-import sys
-
-root, current, previous = map(Path, sys.argv[1:])
-protected = {current, previous}
-releases = sorted(
-    (path for path in root.iterdir() if path.is_dir() and re.fullmatch(r"[0-9a-f]{40}", path.name)),
-    key=lambda path: path.stat().st_mtime,
-    reverse=True,
-)
-for path in [path for path in releases if path not in protected][3:]:
-    shutil.rmtree(path)
-PY
-fi
+done
 printf '%s\n' "$sha" > "$base/current-sha"
 echo "SPHEREx $scope deployed: $sha"

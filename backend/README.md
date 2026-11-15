@@ -1,8 +1,14 @@
 # Backend científico
 
-Esta etapa contém apenas os serviços Python que consultam e processam dados da
-SPHEREx. A camada FastAPI é mantida separada e será integrada por outro membro da
-equipe.
+Serviços Python que consultam e processam dados da SPHEREx, expostos à API Node
+pelo FastAPI em `app/main.py` (contratos em `docs/api.md`).
+
+```sh
+cd backend
+pip install -r requirements-dev.txt
+uvicorn app.main:app --port 8000 --reload   # API Node: PYTHON_API_URL=http://localhost:8000
+python -m unittest discover -s tests -p 'test_*.py'
+```
 
 ## Dependências atuais
 

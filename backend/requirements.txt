@@ -1,4 +1,4 @@
-# Dependências diretas usadas pelo núcleo científico nesta primeira etapa.
+# Dependências diretas do núcleo científico e da camada HTTP.
 astropy>=7.1,<8
 astroquery>=0.4.11,<0.5
 numpy>=2.0,<3
@@ -6,3 +6,5 @@ Pillow>=12,<13
 pyvo>=1.7,<2
 requests>=2.32,<3
 reproject>=0.21,<0.22
+fastapi>=0.162,<1
+uvicorn>=0.54,<1
