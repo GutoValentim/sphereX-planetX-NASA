@@ -99,8 +99,14 @@ mede o alvo em todas as observações das bandas pedidas (fotometria de abertura
 com fundo local, λ do `WCS-WAVE` no pixel do alvo, erro pela `VARIANCE`) e grava
 SVGs (`spectrum_chart.render_spectrum_svg`, sem matplotlib) com nome por hash de
 conteúdo. `IrsaClient.download_hdus` baixa o cutout só até a extensão pedida.
-Ainda não está exposto no FastAPI de produção; o laboratório usa
-`output: "spectrum"`.
+No FastAPI, `POST /receber-dados` com `elemento: "espectro"` inicia um job
+(`spectrum_jobs.SpectrumJobManager`, compartilhado com o laboratório, que usa
+`output: "spectrum"`); `GET /espectros/<id>` acompanha e
+`GET /espectros/arquivos/...svg` serve os gráficos. Contrato em `docs/api.md`.
+
+Limitações: sem propagação de movimento próprio (alvos rápidos saem da
+abertura), sem correção de abertura (valor absoluto alguns % abaixo; forma
+preservada) e FLAGS não usadas até termos a tabela oficial de bits.
 
 O FITS continua sendo a fonte científica. Os frames são derivados para exibição.
 Na comparação entre épocas, todos os frames devem usar o mesmo intervalo

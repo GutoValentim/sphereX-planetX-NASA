@@ -13,14 +13,18 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+import re
 import time
-from typing import Any, Callable, Protocol, TypeVar
+from typing import Any, Callable, Literal, Protocol, TypeVar
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from app.services.spectral_color import SPHEREX_BANDS, get_spherex_band
+from app.services.spectrum_jobs import SpectrumJobManager
+from app.services.spectrum_service import SpherexSpectrumService
 from app.services.temporal_sequence_service import (
     SequenceLimitExceeded,
     SpherexTemporalSequenceService,
@@ -33,6 +37,10 @@ T = TypeVar("T")
 
 DEFAULT_CACHE_DIR = Path(__file__).resolve().parents[1] / "cache" / "temporal"
 DEFAULT_RELEASE_ENV = Path("/app/.release.env")
+SPECTRUM_FILES_PREFIX = "/espectros/arquivos/"
+_JOB_ID = re.compile(r"[0-9a-f]{16}")
+_SPECTRUM_FILE = re.compile(r"[0-9a-f]{16}/spectrum/[A-Za-z0-9._-]+\.svg")
+THEMES = {"escuro": "dark", "claro": "light"}
 
 
 class DatasetDiscovery(Protocol):
@@ -50,6 +58,15 @@ class Consulta(BaseModel):
         default=None,
         description="Data de referência informada pelo usuário; ainda não filtra a busca.",
     )
+    elemento: Literal["imagem", "espectro"] = Field(
+        default="imagem",
+        description="imagem (padrão): observações da sequência; espectro: gráfico espectral.",
+    )
+    bandas: list[str] | None = Field(
+        default=None,
+        description="Só para espectro: ex. ['SPHEREx-D1', 'D3']. Padrão: D1–D6.",
+    )
+    tema: Literal["escuro", "claro"] = Field(default="escuro", description="Tema dos gráficos.")
 
 
 def release_version() -> str:
@@ -88,16 +105,39 @@ def _with_retry(call: Callable[[], T], *, attempts: int, delay_seconds: float) -
     raise AssertionError("unreachable")
 
 
+def normalize_bands(names: list[str] | None) -> list[str]:
+    """Aceita 'SPHEREx-D3' ou 'D3'; sem bandas, usa D1–D6."""
+
+    if not names:
+        return [band.bandpass for band in SPHEREX_BANDS]
+    resolved = []
+    for name in names:
+        value = name.strip()
+        if re.fullmatch(r"[Dd][1-6]", value):
+            value = f"SPHEREx-{value.upper()}"
+        resolved.append(get_spherex_band(value).bandpass)
+    return list(dict.fromkeys(resolved))
+
+
 def create_app(
     service: DatasetDiscovery | None = None,
     cache_dir: Path | None = None,
     *,
     retry_attempts: int = 3,
     retry_delay_seconds: float = 1.0,
+    spectrum_jobs: SpectrumJobManager | None = None,
 ) -> FastAPI:
     service = service or SpherexTemporalSequenceService(download_workers=4)
     cache_dir = cache_dir or Path(os.environ.get("SPHEREX_CACHE_DIR", DEFAULT_CACHE_DIR))
     version = release_version()
+
+    def spectrum_file_url(path: Path) -> str:
+        relative = path.resolve().relative_to(cache_dir.resolve())
+        return SPECTRUM_FILES_PREFIX + relative.as_posix()
+
+    spectrum_jobs = spectrum_jobs or SpectrumJobManager(
+        SpherexSpectrumService(download_workers=6), cache_dir, spectrum_file_url
+    )
 
     app = FastAPI(title="SPHEREx Python", version=version)
 
@@ -111,7 +151,11 @@ def create_app(
 
     @app.post("/receber-dados")
     def receber_dados(consulta: Consulta) -> Any:
-        """Descobre as observações SPHEREx que cobrem RA/Dec (sem baixar FITS)."""
+        """``imagem``: observações que cobrem RA/Dec (sem baixar FITS).
+        ``espectro``: inicia o espectro D1–D6 e devolve um job para acompanhar."""
+
+        if consulta.elemento == "espectro":
+            return start_spectrum(consulta)
 
         try:
             dataset = _with_retry(
@@ -135,7 +179,48 @@ def create_app(
 
         data = dataset.to_dict()
         data.pop("dataset_path", None)  # caminho interno do servidor
-        return {"consulta": consulta.model_dump(), **data}
+        return {"consulta": consulta.model_dump(include={"RA", "DEC", "Data"}), **data}
+
+    def start_spectrum(consulta: Consulta) -> JSONResponse:
+        try:
+            bands = normalize_bands(consulta.bandas)
+        except ValueError as exc:
+            return _error(400, str(exc))
+        job = spectrum_jobs.start(consulta.RA, consulta.DEC, bands, THEMES[consulta.tema])
+        body = {
+            "consulta": {**consulta.model_dump(), "bandas": bands},
+            "elemento": "espectro",
+            "status_url": f"/espectros/{job['job_id']}",
+            "job": job,
+        }
+        return JSONResponse(status_code=202 if job["status"] == "running" else 200, content=body)
+
+    @app.get("/espectros/{job_id}")
+    def spectrum_status(job_id: str) -> Any:
+        """Progresso por banda; ao concluir, URLs dos SVGs e pontos medidos."""
+
+        if not _JOB_ID.fullmatch(job_id):
+            return _error(400, "Identificador de espectro inválido.")
+        try:
+            return spectrum_jobs.snapshot(job_id)
+        except FileNotFoundError as exc:
+            return _error(404, str(exc))
+
+    @app.get(SPECTRUM_FILES_PREFIX + "{relative:path}")
+    def spectrum_file(relative: str) -> Any:
+        """SVG do gráfico (nome com hash do conteúdo: cache imutável)."""
+
+        if not _SPECTRUM_FILE.fullmatch(relative):
+            return _error(404, "Gráfico não encontrado.")
+        root = cache_dir.resolve()
+        target = (root / relative).resolve()
+        if not target.is_relative_to(root) or not target.is_file():
+            return _error(404, "Gráfico não encontrado.")
+        return FileResponse(
+            target,
+            media_type="image/svg+xml",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
 
     return app
 

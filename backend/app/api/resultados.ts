@@ -33,26 +33,50 @@ export function createApp({
     res.set('Cache-Control', 'no-store');
     res.json({ status: 'ok', service: 'spherex-api', version: gitSha });
   });
-  const forwardConsulta = async (payload: unknown, res: express.Response) => {
+  // O Python fica só na rede interna: a API repassa as chamadas e reescreve os
+  // caminhos /espectros/... para o prefixo público /api/espectros/...
+  const publicPaths = (value: unknown): unknown => {
+    if (typeof value === 'string') {
+      return value.startsWith('/espectros/') ? `/api${value}` : value;
+    }
+    if (Array.isArray(value)) return value.map(publicPaths);
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, publicPaths(item)]));
+    }
+    return value;
+  };
+  const callPython = async (path: string, res: express.Response, init: RequestInit = {}) => {
     if (!pythonApiUrl) {
       res.status(503).json({ erro: 'Serviço Python ainda não configurado.' });
-      return;
+      return null;
     }
     try {
-      const response = await fetch(new URL('/receber-dados', pythonApiUrl), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+      return await fetch(new URL(path, pythonApiUrl), {
+        ...init,
         signal: AbortSignal.timeout(pythonTimeoutMs),
       });
-      res.status(response.status).json(await response.json());
     } catch (error) {
       const timedOut = error instanceof Error && error.name === 'TimeoutError';
       res.status(timedOut ? 504 : 502).json({ erro: 'Falha na comunicação com FastAPI' });
+      return null;
     }
   };
+  const relayJson = async (path: string, res: express.Response, init: RequestInit = {}) => {
+    const response = await callPython(path, res, init);
+    if (!response) return;
+    try {
+      res.status(response.status).json(publicPaths(await response.json()));
+    } catch {
+      res.status(502).json({ erro: 'Resposta inválida do FastAPI' });
+    }
+  };
+  const forwardConsulta = (payload: unknown, res: express.Response) => relayJson('/receber-dados', res, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
   app.get('/api/consulta', async (req, res) => {
-    const { RA, DEC, Data } = req.query;
+    const { RA, DEC, Data, elemento, bandas, tema } = req.query;
     const ra = typeof RA === 'string' && RA.trim() ? Number(RA) : Number.NaN;
     const dec = typeof DEC === 'string' && DEC.trim() ? Number(DEC) : Number.NaN;
     if (!Number.isFinite(ra) || !Number.isFinite(dec) ||
@@ -60,10 +84,50 @@ export function createApp({
       res.status(400).json({ erro: 'Informe RA, DEC e Data válidos na query.' });
       return;
     }
-    await forwardConsulta({ RA: ra, DEC: dec, Data }, res);
+    if (elemento !== undefined && elemento !== 'imagem' && elemento !== 'espectro') {
+      res.status(400).json({ erro: 'elemento deve ser "imagem" (padrão) ou "espectro".' });
+      return;
+    }
+    if (tema !== undefined && tema !== 'escuro' && tema !== 'claro') {
+      res.status(400).json({ erro: 'tema deve ser "escuro" ou "claro".' });
+      return;
+    }
+    if (bandas !== undefined && typeof bandas !== 'string') {
+      res.status(400).json({ erro: 'bandas deve ser uma lista separada por vírgulas, ex.: D1,D3.' });
+      return;
+    }
+    const payload: Record<string, unknown> = { RA: ra, DEC: dec, Data };
+    if (elemento) payload.elemento = elemento;
+    if (tema) payload.tema = tema;
+    if (bandas) payload.bandas = bandas.split(',').map((band) => band.trim()).filter(Boolean);
+    await forwardConsulta(payload, res);
   });
   app.post('/api/consulta', async (req, res) => {
     await forwardConsulta(req.body, res);
+  });
+  app.get('/api/espectros/:jobId', async (req, res) => {
+    if (!/^[0-9a-f]{16}$/.test(req.params.jobId)) {
+      res.status(400).json({ erro: 'Identificador de espectro inválido.' });
+      return;
+    }
+    await relayJson(`/espectros/${req.params.jobId}`, res);
+  });
+  app.get('/api/espectros/arquivos/:dataset/spectrum/:file', async (req, res) => {
+    const { dataset, file } = req.params;
+    if (!/^[0-9a-f]{16}$/.test(dataset) || !/^[A-Za-z0-9._-]+\.svg$/.test(file)) {
+      res.status(404).json({ erro: 'Gráfico não encontrado.' });
+      return;
+    }
+    const response = await callPython(`/espectros/arquivos/${dataset}/spectrum/${file}`, res);
+    if (!response) return;
+    if (!response.ok) {
+      res.status(response.status).json({ erro: 'Gráfico não encontrado.' });
+      return;
+    }
+    res.status(200);
+    res.set('Content-Type', 'image/svg+xml');
+    res.set('Cache-Control', response.headers.get('cache-control') ?? 'public, max-age=31536000, immutable');
+    res.send(Buffer.from(await response.arrayBuffer()));
   });
   return app;
 }

@@ -45,6 +45,7 @@ from app.services.temporal_sequence_service import (  # noqa: E402
     SequenceLimitExceeded,
     SpherexTemporalSequenceService,
 )
+from app.services.spectrum_jobs import SpectrumJobManager  # noqa: E402
 from app.services.spectrum_service import SpherexSpectrumService  # noqa: E402
 from app.services.spectral_color import (  # noqa: E402
     SPHEREX_BANDS,
@@ -328,103 +329,12 @@ SPECTRUM_SERVICE = SpherexSpectrumService(download_workers=8)
 OUTPUTS = ("image", "spectrum")
 
 
-class SpectrumJobManager:
-    """Monta espectros em segundo plano e informa o progresso por banda."""
-
-    def __init__(self) -> None:
-        self._jobs: dict[str, dict[str, Any]] = {}
-        self._lock = Lock()
-
-    def start(self, ra_deg: float, dec_deg: float, bandpasses: list[str], theme: str) -> dict[str, Any]:
-        key = json.dumps([round(ra_deg, 9), round(dec_deg, 9), sorted(bandpasses), theme])
-        job_id = sha256(key.encode("utf-8")).hexdigest()[:16]
-        with self._lock:
-            existing = self._jobs.get(job_id)
-            if existing is not None and existing["status"] == "running":
-                return self.snapshot(job_id)
-            self._jobs[job_id] = {
-                "job_id": job_id,
-                "status": "running",
-                "started_at": monotonic(),
-                "finished_at": None,
-                "progress": {name: {"done": 0, "total": None} for name in bandpasses},
-                "result": None,
-                "error": None,
-            }
-        Thread(
-            target=self._run,
-            args=(job_id, ra_deg, dec_deg, bandpasses, theme),
-            name=f"spherex-spectrum-{job_id}",
-            daemon=True,
-        ).start()
-        return self.snapshot(job_id)
-
-    def snapshot(self, job_id: str) -> dict[str, Any]:
-        with self._lock:
-            job = self._jobs.get(job_id)
-            if job is None:
-                raise FileNotFoundError(f"Espectro {job_id} não encontrado.")
-            elapsed = (job["finished_at"] or monotonic()) - job["started_at"]
-            data = {key: value for key, value in job.items() if key not in {"started_at", "finished_at"}}
-            data["progress"] = {name: dict(value) for name, value in job["progress"].items()}
-            data["elapsed_ms"] = round(elapsed * 1000, 1)
-            return data
-
-    def is_running(self) -> bool:
-        with self._lock:
-            return any(job["status"] == "running" for job in self._jobs.values())
-
-    def _run(self, job_id: str, ra_deg: float, dec_deg: float, bandpasses: list[str], theme: str) -> None:
-        def on_progress(bandpass: str, done: int, total: int) -> None:
-            with self._lock:
-                self._jobs[job_id]["progress"][bandpass] = {"done": done, "total": total}
-
-        try:
-            result = SPECTRUM_SERVICE.spectrum(
-                ra_deg=ra_deg,
-                dec_deg=dec_deg,
-                bandpasses=bandpasses,
-                output_directory=CACHE_ROOT,
-                theme=theme,
-                on_progress=on_progress,
-            )
-            summary = {
-                "ra_deg": result.ra_deg,
-                "dec_deg": result.dec_deg,
-                "combined_chart_url": _cache_url(result.combined_chart),
-                "bands": [
-                    {
-                        "bandpass": band.bandpass,
-                        "band": band.band,
-                        "chart_url": _cache_url(result.band_charts[band.bandpass])
-                        if band.bandpass in result.band_charts else None,
-                        "observation_count": band.observation_count,
-                        "measured_count": len(band.points),
-                        "rejected": band.rejected,
-                        "failed": band.failed,
-                        "outliers": list(band.outliers),
-                        "error": band.error,
-                        "points": [point.to_dict() for point in band.points],
-                    }
-                    for band in result.bands
-                ],
-            }
-            with self._lock:
-                self._jobs[job_id].update(status="completed", result=summary)
-        except Exception as error:  # laboratório: torna a falha visível na interface
-            with self._lock:
-                self._jobs[job_id].update(status="failed", error=str(error))
-        finally:
-            with self._lock:
-                self._jobs[job_id]["finished_at"] = monotonic()
-
-
-def _cache_url(path: str) -> str:
+def _cache_url(path: Path) -> str:
     relative = Path(path).resolve().relative_to(CACHE_ROOT.resolve())
     return f"/cache/{relative.as_posix()}"
 
 
-SPECTRUM_JOBS = SpectrumJobManager()
+SPECTRUM_JOBS = SpectrumJobManager(SPECTRUM_SERVICE, CACHE_ROOT, _cache_url)
 
 
 class TemporalLabHandler(BaseHTTPRequestHandler):
