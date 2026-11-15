@@ -4,41 +4,166 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from hashlib import sha256
+from math import ceil
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
+import os
 from pathlib import Path
 import sys
 from threading import Lock, Thread
 from time import monotonic
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 LAB_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = LAB_ROOT.parents[1]
 EXTERNAL_DEV_ROOT = PROJECT_ROOT.parent / "dev"
 PUBLIC_ROOT = LAB_ROOT / "public"
-CACHE_ROOT = EXTERNAL_DEV_ROOT / "results" / "temporal-lab-cache"
+CACHE_ROOT = Path(
+    os.environ.get(
+        "SPHEREX_LAB_CACHE_DIR",
+        EXTERNAL_DEV_ROOT / "results" / "temporal-lab-cache",
+    )
+).expanduser()
 sys.path.insert(0, str(PROJECT_ROOT / "backend"))
 
+from app.services.frame_generator import (  # noqa: E402
+    COLOR_MODES,
+    RENDER_PROFILES,
+    get_render_profile,
+)
 from app.services.temporal_sequence_service import (  # noqa: E402
+    FIXED_SEQUENCE_PIXEL_SCALE_ARCSEC,
+    FRAME_CACHE_VERSION,
     SequenceLimitExceeded,
     SpherexTemporalSequenceService,
 )
+from app.services.spectrum_jobs import SpectrumJobManager  # noqa: E402
+from app.services.spectrum_service import SpherexSpectrumService  # noqa: E402
+from app.services.spectral_color import (  # noqa: E402
+    SPHEREX_BANDS,
+    get_spherex_band,
+)
 
 
-SERVICE = SpherexTemporalSequenceService(download_workers=8)
+# Janela final (FOV) em arcmin. O recorte-fonte cresce na mesma proporção
+# (1,5×) para que rotações e a reprojeção nunca deixem cantos sem dados.
+FOV_OPTIONS = (10.0, 15.0, 20.0, 30.0, 40.0)
+DEFAULT_FOV_ARCMIN = 30.0
+CUTOUT_RATIO = 1.5
+SAMPLING_OPTIONS = {
+    "native": FIXED_SEQUENCE_PIXEL_SCALE_ARCSEC,
+    "2x": FIXED_SEQUENCE_PIXEL_SCALE_ARCSEC / 2,
+}
+DEFAULT_SAMPLING = "native"
+DEFAULT_RENDER_PROFILE = "limpa"
+
+_SERVICES: dict[tuple[str, float, str], SpherexTemporalSequenceService] = {}
+_SERVICES_LOCK = Lock()
+
+
+def service_for(
+    bandpass: str,
+    fov_arcmin: float = DEFAULT_FOV_ARCMIN,
+    sampling: str = DEFAULT_SAMPLING,
+) -> SpherexTemporalSequenceService:
+    band = get_spherex_band(bandpass)
+    key = (band.bandpass, float(fov_arcmin), sampling)
+    with _SERVICES_LOCK:
+        service = _SERVICES.get(key)
+        if service is None:
+            service = SpherexTemporalSequenceService(
+                bandpass=band.bandpass,
+                fov_arcmin=key[1],
+                cutout_fov_arcmin=key[1] * CUTOUT_RATIO,
+                pixel_scale_arcsec=SAMPLING_OPTIONS[sampling],
+                download_workers=8,
+            )
+            _SERVICES[key] = service
+        return service
+
+
+def service_for_dataset(dataset: Any) -> SpherexTemporalSequenceService:
+    sampling = next(
+        (name for name, scale in SAMPLING_OPTIONS.items()
+         if abs(scale - dataset.pixel_scale_arcsec) < 1e-9),
+        DEFAULT_SAMPLING,
+    )
+    return service_for(dataset.bandpass, dataset.fov_arcmin, sampling)
+
+
+DEFAULT_SERVICE = service_for("SPHEREx-D3")
+
+
+def parse_render_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    """Valida FOV, amostragem, perfil de renderização e modo de cor."""
+
+    fov = float(payload.get("fov_arcmin", DEFAULT_FOV_ARCMIN))
+    if fov not in FOV_OPTIONS:
+        raise ValueError(f"FOV inválido. Use um de: {', '.join(f'{v:g}' for v in FOV_OPTIONS)}.")
+    sampling = str(payload.get("sampling", DEFAULT_SAMPLING))
+    if sampling not in SAMPLING_OPTIONS:
+        raise ValueError(f"Amostragem inválida. Use uma de: {', '.join(SAMPLING_OPTIONS)}.")
+    render_profile = get_render_profile(
+        str(payload.get("render_profile", DEFAULT_RENDER_PROFILE))
+    ).name
+    color_mode = str(payload.get("color_mode", "color"))
+    if color_mode not in COLOR_MODES:
+        raise ValueError(f"Modo de cor inválido. Use um de: {', '.join(COLOR_MODES)}.")
+    return {
+        "fov_arcmin": fov,
+        "sampling": sampling,
+        "render_profile": render_profile,
+        "color_mode": color_mode,
+    }
+
+
+def settings_catalog() -> dict[str, Any]:
+    return {
+        "fov_options": [
+            {
+                "fov_arcmin": fov,
+                "cutout_fov_arcmin": fov * CUTOUT_RATIO,
+                "pixels": {
+                    name: _grid_pixels(fov, scale) for name, scale in SAMPLING_OPTIONS.items()
+                },
+            }
+            for fov in FOV_OPTIONS
+        ],
+        "sampling_options": [
+            {"name": name, "pixel_scale_arcsec": scale}
+            for name, scale in SAMPLING_OPTIONS.items()
+        ],
+        "render_profiles": [profile.to_dict() for profile in RENDER_PROFILES.values()],
+        "color_modes": list(COLOR_MODES),
+        "defaults": {
+            "fov_arcmin": DEFAULT_FOV_ARCMIN,
+            "sampling": DEFAULT_SAMPLING,
+            "render_profile": DEFAULT_RENDER_PROFILE,
+            "color_mode": "color",
+        },
+    }
+
+
+def _grid_pixels(fov_arcmin: float, pixel_scale_arcsec: float) -> int:
+    size = max(3, ceil(fov_arcmin * 60 / pixel_scale_arcsec))
+    return size + 1 if size % 2 == 0 else size
 
 
 @dataclass
 class PrefetchJob:
     job_id: str
     request_id: str
+    bandpass: str
+    render_profile: str
+    color_mode: str
     mode: str
     total: int
     started_at: float = field(default_factory=monotonic)
@@ -54,6 +179,9 @@ class PrefetchJob:
             return {
                 "job_id": self.job_id,
                 "request_id": self.request_id,
+                "bandpass": self.bandpass,
+                "render_profile": self.render_profile,
+                "color_mode": self.color_mode,
                 "mode": self.mode,
                 "status": self.status,
                 "total": self.total,
@@ -77,8 +205,20 @@ class PrefetchJobManager:
         self._jobs: dict[str, PrefetchJob] = {}
         self._lock = Lock()
 
-    def start(self, dataset: Any, indices: list[int], mode: str) -> dict[str, Any]:
-        key = f"{dataset.request_id}:{mode}:{','.join(map(str, indices))}"
+    def start(
+        self,
+        service: SpherexTemporalSequenceService,
+        dataset: Any,
+        indices: list[int],
+        mode: str,
+        *,
+        render_profile: str,
+        color_mode: str,
+    ) -> dict[str, Any]:
+        key = (
+            f"{dataset.request_id}:{mode}:{render_profile}-{color_mode}:"
+            f"{','.join(map(str, indices))}"
+        )
         job_id = sha256(key.encode("utf-8")).hexdigest()[:16]
         with self._lock:
             existing = self._jobs.get(job_id)
@@ -87,13 +227,16 @@ class PrefetchJobManager:
             job = PrefetchJob(
                 job_id=job_id,
                 request_id=dataset.request_id,
+                bandpass=dataset.bandpass,
+                render_profile=render_profile,
+                color_mode=color_mode,
                 mode=mode,
                 total=len(indices),
             )
             self._jobs[job_id] = job
         Thread(
             target=self._run,
-            args=(job, dataset, indices),
+            args=(job, service, dataset, indices),
             name=f"spherex-prefetch-{job_id}",
             daemon=True,
         ).start()
@@ -115,7 +258,13 @@ class PrefetchJobManager:
             for job in jobs
         )
 
-    def _run(self, job: PrefetchJob, dataset: Any, indices: list[int]) -> None:
+    def _run(
+        self,
+        job: PrefetchJob,
+        service: SpherexTemporalSequenceService,
+        dataset: Any,
+        indices: list[int],
+    ) -> None:
         def on_progress(index: int, result: Any, error: str | None) -> None:
             with job.lock:
                 if result is not None:
@@ -124,22 +273,46 @@ class PrefetchJobManager:
                         "observation_id": result.observation.observation_id,
                         "image_url": (
                             f"/cache/{job.request_id}/{result.relative_path}"
+                            f"?v={FRAME_CACHE_VERSION}"
                         ),
                         "cache_hit": result.cache_hit,
                         "aligned": result.frame.aligned,
                         "center_ra_deg": result.frame.center_ra_deg,
                         "center_dec_deg": result.frame.center_dec_deg,
                         "coverage_fraction": result.frame.coverage_fraction,
+                        "colorized": result.frame.colorized,
+                        "wavelength_min_um": result.frame.wavelength_min_um,
+                        "wavelength_max_um": result.frame.wavelength_max_um,
+                        "wavelength_median_um": result.frame.wavelength_median_um,
+                        "visible_wavelength_min_nm": (
+                            result.frame.visible_wavelength_min_nm
+                        ),
+                        "visible_wavelength_max_nm": (
+                            result.frame.visible_wavelength_max_nm
+                        ),
+                        "visible_wavelength_median_nm": (
+                            result.frame.visible_wavelength_median_nm
+                        ),
+                        "false_color_rgb": result.frame.false_color_rgb,
+                        "opacity": result.frame.opacity,
+                        "render_profile": result.frame.render_profile,
+                        "stretch": result.frame.stretch,
+                        "background_mode": result.frame.background_mode,
+                        "noise_sigma": result.frame.noise_sigma,
+                        "width": result.frame.width,
+                        "height": result.frame.height,
                     }
                 else:
                     job.errors[index] = error or "Falha desconhecida."
 
         try:
-            SERVICE.prefetch_frames(
+            service.prefetch_frames(
                 dataset=dataset,
                 observation_indices=indices,
                 output_directory=CACHE_ROOT,
                 on_progress=on_progress,
+                render_profile=job.render_profile,
+                color_mode=job.color_mode,
             )
             with job.lock:
                 job.status = "partial" if job.errors else "completed"
@@ -152,6 +325,16 @@ class PrefetchJobManager:
 
 
 PREFETCH_JOBS = PrefetchJobManager()
+SPECTRUM_SERVICE = SpherexSpectrumService(download_workers=8)
+OUTPUTS = ("image", "spectrum")
+
+
+def _cache_url(path: Path) -> str:
+    relative = Path(path).resolve().relative_to(CACHE_ROOT.resolve())
+    return f"/cache/{relative.as_posix()}"
+
+
+SPECTRUM_JOBS = SpectrumJobManager(SPECTRUM_SERVICE, CACHE_ROOT, _cache_url)
 
 
 class TemporalLabHandler(BaseHTTPRequestHandler):
@@ -174,13 +357,20 @@ class TemporalLabHandler(BaseHTTPRequestHandler):
                 {
                     "status": "ok",
                     "cache_directory": str(CACHE_ROOT),
-                    "fov_arcmin": SERVICE.fov_arcmin,
-                    "cutout_fov_arcmin": SERVICE.cutout_fov_arcmin,
-                    "bandpass": SERVICE.bandpass,
+                    "fov_arcmin": DEFAULT_SERVICE.fov_arcmin,
+                    "cutout_fov_arcmin": DEFAULT_SERVICE.cutout_fov_arcmin,
+                    "bands": [band.to_dict() for band in SPHEREX_BANDS],
+                    "settings": settings_catalog(),
                 }
             )
             return
         parts = path.strip("/").split("/")
+        if len(parts) == 3 and parts[:2] == ["api", "spectra"]:
+            try:
+                self._send_json(SPECTRUM_JOBS.snapshot(parts[2]))
+            except FileNotFoundError as error:
+                self._send_error_json(HTTPStatus.NOT_FOUND, str(error))
+            return
         if len(parts) == 3 and parts[:2] == ["api", "prefetch"]:
             try:
                 self._send_json(PREFETCH_JOBS.get(parts[2]))
@@ -197,6 +387,9 @@ class TemporalLabHandler(BaseHTTPRequestHandler):
         try:
             if path == "/api/datasets":
                 self._discover_dataset()
+                return
+            if path == "/api/composites":
+                self._discover_composite()
                 return
             parts = path.strip("/").split("/")
             if (
@@ -226,13 +419,13 @@ class TemporalLabHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             if path == "/api/cache":
-                if PREFETCH_JOBS.is_running():
+                if PREFETCH_JOBS.is_running() or SPECTRUM_JOBS.is_running():
                     self._send_error_json(
                         HTTPStatus.CONFLICT,
                         "Aguarde o pré-carregamento atual terminar antes de limpar o cache.",
                     )
                     return
-                removed = SERVICE.clear_cache(CACHE_ROOT)
+                removed = DEFAULT_SERVICE.clear_cache(CACHE_ROOT)
                 self._send_json({"removed": removed, "scope": "all"})
                 return
             parts = path.strip("/").split("/")
@@ -243,7 +436,7 @@ class TemporalLabHandler(BaseHTTPRequestHandler):
                         "Este dataset ainda está sendo pré-carregado.",
                     )
                     return
-                removed = SERVICE.clear_cache(CACHE_ROOT, parts[2])
+                removed = DEFAULT_SERVICE.clear_cache(CACHE_ROOT, parts[2])
                 self._send_json(
                     {"removed": removed, "scope": "dataset", "request_id": parts[2]}
                 )
@@ -257,16 +450,27 @@ class TemporalLabHandler(BaseHTTPRequestHandler):
         ra_deg = float(payload["ra_deg"])
         dec_deg = float(payload["dec_deg"])
         mode = str(payload.get("mode", "balanced"))
+        bandpass = str(payload.get("bandpass", "SPHEREx-D3"))
+        settings = parse_render_settings(payload)
+        service = service_for(bandpass, settings["fov_arcmin"], settings["sampling"])
+        spectral_band = get_spherex_band(bandpass)
         refresh = bool(payload.get("refresh", False))
         started = monotonic()
-        dataset = SERVICE.discover_dataset(
+        dataset = service.discover_dataset(
             ra_deg=ra_deg,
             dec_deg=dec_deg,
             output_directory=CACHE_ROOT,
             use_cache=not refresh,
         )
-        selected_indices = SERVICE.select_indices(dataset, mode)
-        prefetch = PREFETCH_JOBS.start(dataset, selected_indices, mode)
+        selected_indices = service.select_indices(dataset, mode)
+        prefetch = PREFETCH_JOBS.start(
+            service,
+            dataset,
+            selected_indices,
+            mode,
+            render_profile=settings["render_profile"],
+            color_mode=settings["color_mode"],
+        )
         frames = []
         previous_time: datetime | None = None
         for position, observation_index in enumerate(selected_indices):
@@ -296,6 +500,8 @@ class TemporalLabHandler(BaseHTTPRequestHandler):
                 "fov_arcmin": dataset.fov_arcmin,
                 "cutout_fov_arcmin": dataset.cutout_fov_arcmin,
                 "bandpass": dataset.bandpass,
+                "spectral_band": spectral_band.to_dict(),
+                **settings,
                 "aligned": True,
                 "mode": mode,
                 "cache_hit": dataset.cache_hit,
@@ -309,16 +515,197 @@ class TemporalLabHandler(BaseHTTPRequestHandler):
             }
         )
 
+    def _discover_composite(self) -> None:
+        payload = self._read_json()
+        ra_deg = float(payload["ra_deg"])
+        dec_deg = float(payload["dec_deg"])
+        mode = str(payload.get("mode", "fast"))
+        refresh = bool(payload.get("refresh", False))
+        requested = payload.get("bandpasses")
+        if not isinstance(requested, list) or not requested:
+            raise ValueError("Selecione pelo menos uma banda espectral.")
+        requested_names = [str(value) for value in requested]
+        if len(set(requested_names)) != len(requested_names):
+            raise ValueError("A seleção contém bandas repetidas.")
+        if len(requested_names) > len(SPHEREX_BANDS):
+            raise ValueError("A seleção excede as seis bandas SPHEREx.")
+        bandpasses = [get_spherex_band(name).bandpass for name in requested_names]
+        output = str(payload.get("output", "image"))
+        if output not in OUTPUTS:
+            raise ValueError(f"Saída inválida. Use uma de: {', '.join(OUTPUTS)}.")
+        if output == "spectrum":
+            # Espectro usa todas as observações e recortes pequenos próprios;
+            # FOV, amostragem e renderização de imagem não se aplicam.
+            theme = str(payload.get("theme", "dark"))
+            job = SPECTRUM_JOBS.start(ra_deg, dec_deg, bandpasses, theme)
+            self._send_json(
+                {
+                    "output": "spectrum",
+                    "ra_deg": ra_deg,
+                    "dec_deg": dec_deg,
+                    "bandpasses": bandpasses,
+                    "bands": [get_spherex_band(name).to_dict() for name in bandpasses],
+                    "job": job,
+                }
+            )
+            return
+        settings = parse_render_settings(payload)
+        started = monotonic()
+
+        def band_service(bandpass: str) -> SpherexTemporalSequenceService:
+            return service_for(bandpass, settings["fov_arcmin"], settings["sampling"])
+
+        def discover(bandpass: str) -> tuple[str, Any]:
+            service = band_service(bandpass)
+            dataset = service.discover_dataset(
+                ra_deg=ra_deg,
+                dec_deg=dec_deg,
+                output_directory=CACHE_ROOT,
+                use_cache=not refresh,
+            )
+            return bandpass, dataset
+
+        with ThreadPoolExecutor(max_workers=len(bandpasses)) as executor:
+            discovered = executor.map(discover, bandpasses)
+        datasets = dict(discovered)
+
+        anchor_bandpass = bandpasses[0]
+        anchor_dataset = datasets[anchor_bandpass]
+        anchor_service = band_service(anchor_bandpass)
+        anchor_indices = anchor_service.select_indices(anchor_dataset, mode)
+        selected_by_band: dict[str, set[int]] = {
+            bandpass: set() for bandpass in bandpasses
+        }
+        timeline = []
+        for position, anchor_index in enumerate(anchor_indices):
+            anchor_observation = anchor_dataset.observations[anchor_index]
+            anchor_time = _observation_time(anchor_observation)
+            layers = []
+            for bandpass in bandpasses:
+                dataset = datasets[bandpass]
+                if bandpass == anchor_bandpass:
+                    observation_index = anchor_index
+                else:
+                    observation_index = min(
+                        range(dataset.frame_count),
+                        key=lambda index: abs(
+                            (
+                                _observation_time(dataset.observations[index])
+                                - anchor_time
+                            ).total_seconds()
+                        ),
+                    )
+                selected_by_band[bandpass].add(observation_index)
+                observation = dataset.observations[observation_index]
+                delta_seconds = (
+                    _observation_time(observation) - anchor_time
+                ).total_seconds()
+                layers.append(
+                    {
+                        "bandpass": bandpass,
+                        "dataset_request_id": dataset.request_id,
+                        "observation_index": observation_index,
+                        "observation_id": observation.observation_id,
+                        "observed_at": observation.observed_at,
+                        "delta_seconds": delta_seconds,
+                    }
+                )
+            timeline.append(
+                {
+                    "position": position,
+                    "anchor_bandpass": anchor_bandpass,
+                    "anchor_observation_id": anchor_observation.observation_id,
+                    "observed_at": anchor_observation.observed_at,
+                    "gap_from_previous_seconds": _timeline_gap(
+                        timeline,
+                        anchor_time,
+                    ),
+                    "layers": layers,
+                }
+            )
+
+        jobs = {}
+        dataset_summaries = []
+        for bandpass in bandpasses:
+            service = band_service(bandpass)
+            dataset = datasets[bandpass]
+            indices = sorted(selected_by_band[bandpass])
+            jobs[bandpass] = PREFETCH_JOBS.start(
+                service,
+                dataset,
+                indices,
+                mode,
+                render_profile=settings["render_profile"],
+                color_mode=settings["color_mode"],
+            )
+            dataset_summaries.append(
+                {
+                    "bandpass": bandpass,
+                    "request_id": dataset.request_id,
+                    "cache_hit": dataset.cache_hit,
+                    "available_frame_count": dataset.frame_count,
+                    "selected_frame_count": len(indices),
+                }
+            )
+
+        composite_key = ":".join(
+            [
+                "image",
+                mode,
+                settings["render_profile"],
+                settings["color_mode"],
+                *(datasets[name].request_id for name in bandpasses),
+            ]
+        )
+        self._send_json(
+            {
+                "output": "image",
+                "request_id": sha256(composite_key.encode("utf-8")).hexdigest()[:16],
+                "ra_deg": ra_deg,
+                "dec_deg": dec_deg,
+                "fov_arcmin": anchor_dataset.fov_arcmin,
+                "cutout_fov_arcmin": anchor_dataset.cutout_fov_arcmin,
+                "pixel_scale_arcsec": anchor_dataset.pixel_scale_arcsec,
+                "grid_pixels": _grid_pixels(
+                    anchor_dataset.fov_arcmin, anchor_dataset.pixel_scale_arcsec
+                ),
+                **settings,
+                "bandpasses": bandpasses,
+                "bands": [get_spherex_band(name).to_dict() for name in bandpasses],
+                "anchor_bandpass": anchor_bandpass,
+                "aligned": True,
+                "mode": mode,
+                "timeline_count": len(timeline),
+                "discovery_ms": round((monotonic() - started) * 1000, 1),
+                "datasets": dataset_summaries,
+                "prefetch": jobs,
+                "frames": timeline,
+            }
+        )
+
     def _materialize_frame(self, request_id: str, observation_index: int) -> None:
         started = monotonic()
-        dataset = SERVICE.load_dataset(CACHE_ROOT, request_id)
-        result = SERVICE.materialize_frame(
+        dataset = DEFAULT_SERVICE.load_dataset(CACHE_ROOT, request_id)
+        service = service_for_dataset(dataset)
+        query = parse_qs(urlparse(self.path).query)
+        settings = parse_render_settings(
+            {
+                "fov_arcmin": dataset.fov_arcmin,
+                "render_profile": query.get("profile", [DEFAULT_RENDER_PROFILE])[0],
+                "color_mode": query.get("color", ["color"])[0],
+            }
+        )
+        result = service.materialize_frame(
             dataset=dataset,
             observation_index=observation_index,
             output_directory=CACHE_ROOT,
+            render_profile=settings["render_profile"],
+            color_mode=settings["color_mode"],
         )
         data = result.to_dict()
-        data["image_url"] = f"/cache/{request_id}/{result.relative_path}"
+        data["image_url"] = (
+            f"/cache/{request_id}/{result.relative_path}?v={FRAME_CACHE_VERSION}"
+        )
         data["elapsed_ms"] = round((monotonic() - started) * 1000, 1)
         self._send_json(data)
 
@@ -329,14 +716,14 @@ class TemporalLabHandler(BaseHTTPRequestHandler):
             return
         _, request_id, relative = parts
         try:
-            dataset_directory = SERVICE._cache_target(CACHE_ROOT, request_id)
+            dataset_directory = DEFAULT_SERVICE._cache_target(CACHE_ROOT, request_id)
         except ValueError as error:
             self._send_error_json(HTTPStatus.BAD_REQUEST, str(error))
             return
         target = (dataset_directory / unquote(relative)).resolve()
         if (
             not target.is_relative_to(dataset_directory)
-            or target.suffix.lower() != ".webp"
+            or target.suffix.lower() not in {".webp", ".svg"}
             or not target.is_file()
         ):
             self._send_error_json(HTTPStatus.NOT_FOUND, "Frame não encontrado.")
@@ -388,6 +775,19 @@ class TemporalLabHandler(BaseHTTPRequestHandler):
         )
 
 
+def _observation_time(observation: Any) -> datetime:
+    if not observation.observed_at:
+        raise ValueError("Observação sem data não pode compor a linha temporal.")
+    return datetime.fromisoformat(observation.observed_at)
+
+
+def _timeline_gap(timeline: list[dict[str, Any]], current: datetime) -> float | None:
+    if not timeline:
+        return None
+    previous = datetime.fromisoformat(str(timeline[-1]["observed_at"]))
+    return (current - previous).total_seconds()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
@@ -398,6 +798,13 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+    Thread(
+        target=lambda: print(
+            f"Calibrações WCS-WAVE aprendidas do cache: {SPECTRUM_SERVICE.seed_calibrations(CACHE_ROOT)}"
+        ),
+        name="spherex-seed-calibrations",
+        daemon=True,
+    ).start()
     server = ThreadingHTTPServer((args.host, args.port), TemporalLabHandler)
     print(f"SPHEREx Temporal Lab: http://{args.host}:{args.port}")
     print(f"Cache: {CACHE_ROOT}")

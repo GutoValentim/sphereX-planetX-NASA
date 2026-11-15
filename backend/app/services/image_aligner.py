@@ -67,6 +67,10 @@ class AlignedImage:
     source_unit: str | None
     coverage_fraction: float
     center_covered: bool
+    wavelength_um: np.ndarray | None
+    wavelength_min_um: float | None
+    wavelength_max_um: float | None
+    wavelength_median_um: float | None
 
 
 def build_common_sky_grid(
@@ -75,12 +79,15 @@ def build_common_sky_grid(
     center_ra_deg: float,
     center_dec_deg: float,
     fov_arcmin: float,
+    pixel_scale_arcsec: float | None = None,
     source_hdu: str = "IMAGE",
 ) -> CommonSkyGrid:
     """Cria uma grade TAN norte-para-cima centrada no alvo solicitado."""
 
     if not 0 < fov_arcmin <= 60:
         raise ValueError("fov_arcmin deve estar no intervalo (0, 60].")
+    if pixel_scale_arcsec is not None and pixel_scale_arcsec <= 0:
+        raise ValueError("pixel_scale_arcsec deve ser maior que zero.")
     if not 0 <= center_ra_deg < 360 or not -90 <= center_dec_deg <= 90:
         raise ValueError("Centro celeste fora dos limites de RA/Dec.")
 
@@ -94,7 +101,12 @@ def build_common_sky_grid(
         raise ValueError("A extensão científica não possui WCS celeste bidimensional.")
 
     pixel_area_deg2 = abs(float(proj_plane_pixel_area(source_wcs)))
-    pixel_scale_deg = sqrt(pixel_area_deg2)
+    source_pixel_scale_deg = sqrt(pixel_area_deg2)
+    pixel_scale_deg = (
+        source_pixel_scale_deg
+        if pixel_scale_arcsec is None
+        else pixel_scale_arcsec / 3600
+    )
     if not np.isfinite(pixel_scale_deg) or pixel_scale_deg <= 0:
         raise ValueError("Não foi possível determinar a escala angular do FITS.")
 
@@ -147,6 +159,7 @@ def align_fits_image(
         data = np.asarray(hdu.data, dtype=np.float32)
         source_wcs = WCS(hdu.header).celestial
         source_unit = hdu.header.get("BUNIT")
+        source_wavelength = _source_wavelength_map(hdus, hdu, data.shape)
 
     if data.ndim != 2:
         raise ValueError(f"A extensão {source_hdu!r} deve ser bidimensional.")
@@ -171,9 +184,77 @@ def align_fits_image(
     if not center_covered:
         raise ValueError("A observação não cobre o centro da grade comum.")
 
+    aligned_wavelength = None
+    wavelength_min = None
+    wavelength_max = None
+    wavelength_median = None
+    if source_wavelength is not None:
+        reprojected_wavelength, wavelength_footprint = reproject_interp(
+            (source_wavelength, source_wcs),
+            grid.wcs,
+            shape_out=grid.shape,
+            order=interpolation_order,
+            roundtrip_coords=True,
+            return_footprint=True,
+        )
+        aligned_wavelength = np.asarray(reprojected_wavelength, dtype=np.float32)
+        wavelength_valid = (
+            valid
+            & np.isfinite(aligned_wavelength)
+            & (np.asarray(wavelength_footprint) > 0)
+        )
+        aligned_wavelength[~wavelength_valid] = np.nan
+        if wavelength_valid.any():
+            values = aligned_wavelength[wavelength_valid]
+            wavelength_min = float(np.min(values))
+            wavelength_max = float(np.max(values))
+            wavelength_median = float(np.median(values))
+
     return AlignedImage(
         data=aligned,
         source_unit=source_unit,
         coverage_fraction=float(np.count_nonzero(valid) / valid.size),
         center_covered=center_covered,
+        wavelength_um=aligned_wavelength,
+        wavelength_min_um=wavelength_min,
+        wavelength_max_um=wavelength_max,
+        wavelength_median_um=wavelength_median,
     )
+
+
+def _source_wavelength_map(
+    hdus: fits.HDUList,
+    image_hdu: fits.ImageHDU,
+    shape: tuple[int, ...],
+) -> np.ndarray | None:
+    """Avalia o WCS-WAVE tabular do SPHEREx na grade original do cutout."""
+
+    if "WCS-WAVE" not in hdus or len(shape) != 2:
+        return None
+    try:
+        spectral_header = image_hdu.header.copy()
+        sip_orders = {"A_ORDER", "B_ORDER", "AP_ORDER", "BP_ORDER"}
+        sip_prefixes = ("A_", "B_", "AP_", "BP_")
+        for keyword in tuple(spectral_header):
+            if keyword in sip_orders or keyword.startswith(sip_prefixes):
+                del spectral_header[keyword]
+        spectral_wcs = WCS(spectral_header, hdus, key="W")
+        yy, xx = np.indices(shape, dtype=np.float64)
+        coordinates = np.column_stack((xx.ravel(), yy.ravel()))
+        spectral_values = spectral_wcs.all_pix2world(coordinates, 0)
+        wavelength = np.asarray(spectral_values[:, 0], dtype=np.float32).reshape(shape)
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not np.isfinite(wavelength).any():
+        return None
+    return wavelength
+
+
+def source_wavelength_map(
+    hdus: fits.HDUList,
+    image_hdu: fits.ImageHDU,
+    shape: tuple[int, ...],
+) -> np.ndarray | None:
+    """Mapa λ (µm) por pixel na grade original do FITS, a partir do ``WCS-WAVE``."""
+
+    return _source_wavelength_map(hdus, image_hdu, shape)

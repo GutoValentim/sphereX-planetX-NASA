@@ -85,3 +85,57 @@ test('Python request timeout returns 504', async () => {
   const response = await fetch(`${url}/api/consulta`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   assert.equal(response.status, 504);
 });
+test('GET consultation forwards the spectrum element and rewrites internal URLs', async () => {
+  const upstream = await listen(createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk);
+    assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString()), {
+      RA: 10, DEC: -5, Data: '2026-11-14', elemento: 'espectro', tema: 'claro', bandas: ['D1', 'D3'],
+    });
+    res.writeHead(202, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ elemento: 'espectro', status_url: '/espectros/0123456789abcdef', job: { job_id: '0123456789abcdef' } }));
+  }));
+  const url = await listen(createServer(createApp({ pythonApiUrl: upstream })));
+  const response = await fetch(`${url}/api/consulta?RA=10&DEC=-5&Data=2026-11-14&elemento=espectro&bandas=D1,%20D3&tema=claro`);
+  assert.equal(response.status, 202);
+  assert.equal((await response.json()).status_url, '/api/espectros/0123456789abcdef');
+});
+test('GET consultation rejects an unknown element', async () => {
+  const url = await listen(createServer(createApp({ pythonApiUrl: 'http://127.0.0.1:1' })));
+  const response = await fetch(`${url}/api/consulta?RA=10&DEC=-5&Data=2026-11-14&elemento=video`);
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).erro, /elemento/);
+});
+test('spectrum status and SVG files are proxied from Python', async () => {
+  const upstream = await listen(createServer((req, res) => {
+    if (req.url === '/espectros/0123456789abcdef') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'completed', result: { combined_chart_url: '/espectros/arquivos/0123456789abcdef/spectrum/combined-dark-aa.svg', bands: [{ chart_url: null }] } }));
+      return;
+    }
+    if (req.url === '/espectros/arquivos/0123456789abcdef/spectrum/combined-dark-aa.svg') {
+      res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=31536000, immutable' });
+      res.end('<svg xmlns="http://www.w3.org/2000/svg"/>');
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end('{"erro":"x"}');
+  }));
+  const url = await listen(createServer(createApp({ pythonApiUrl: upstream })));
+  const status = await fetch(`${url}/api/espectros/0123456789abcdef`);
+  const body = await status.json();
+  assert.equal(body.result.combined_chart_url, '/api/espectros/arquivos/0123456789abcdef/spectrum/combined-dark-aa.svg');
+  assert.equal(body.result.bands[0].chart_url, null);
+  const chart = await fetch(`${url}${body.result.combined_chart_url}`);
+  assert.equal(chart.status, 200);
+  assert.equal(chart.headers.get('content-type'), 'image/svg+xml');
+  assert.match(chart.headers.get('cache-control') ?? '', /immutable/);
+  assert.match(await chart.text(), /<svg/);
+  assert.equal((await fetch(`${url}/api/espectros/arquivos/0123456789abcdef/spectrum/missing.svg`)).status, 404);
+});
+test('spectrum routes validate identifiers before calling Python', async () => {
+  const url = await listen(createServer(createApp({ pythonApiUrl: 'http://127.0.0.1:1' })));
+  assert.equal((await fetch(`${url}/api/espectros/not-a-job`)).status, 400);
+  assert.equal((await fetch(`${url}/api/espectros/arquivos/0123456789abcdef/spectrum/x.fits`)).status, 404);
+  assert.equal((await fetch(`${url}/api/espectros/arquivos/abc/spectrum/x.svg`)).status, 404);
+});

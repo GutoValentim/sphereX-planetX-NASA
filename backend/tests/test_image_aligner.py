@@ -56,6 +56,46 @@ def centroid(data: np.ndarray) -> tuple[float, float]:
 
 
 class ImageAlignerTests(unittest.TestCase):
+    def test_explicit_scale_builds_identical_cross_band_grid(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first_path = root / "first.fits"
+            second_path = root / "second.fits"
+            write_star_fits(
+                first_path,
+                rotated_wcs(
+                    crval_ra=TARGET_RA + 0.08,
+                    crval_dec=TARGET_DEC - 0.04,
+                    rotation_deg=0,
+                ),
+            )
+            write_star_fits(
+                second_path,
+                rotated_wcs(
+                    crval_ra=TARGET_RA - 0.06,
+                    crval_dec=TARGET_DEC + 0.07,
+                    rotation_deg=31,
+                ),
+            )
+
+            first = build_common_sky_grid(
+                first_path,
+                center_ra_deg=TARGET_RA,
+                center_dec_deg=TARGET_DEC,
+                fov_arcmin=30,
+                pixel_scale_arcsec=6.15,
+            )
+            second = build_common_sky_grid(
+                second_path,
+                center_ra_deg=TARGET_RA,
+                center_dec_deg=TARGET_DEC,
+                fov_arcmin=30,
+                pixel_scale_arcsec=6.15,
+            )
+
+            self.assertEqual(first.shape, (293, 293))
+            self.assertEqual(first.to_dict(), second.to_dict())
+
     def test_reprojects_shifted_rotated_frames_to_same_center(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -95,6 +135,8 @@ class ImageAlignerTests(unittest.TestCase):
             self.assertAlmostEqual(second_center[0], expected, delta=0.2)
             self.assertAlmostEqual(second_center[1], expected, delta=0.2)
             self.assertLess(np.hypot(*(np.subtract(first_center, second_center))), 0.2)
+            self.assertIsNone(first.wavelength_um)
+            self.assertIsNone(second.wavelength_um)
 
     def test_grid_center_remains_exact_near_celestial_pole(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

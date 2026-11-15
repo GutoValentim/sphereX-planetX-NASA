@@ -42,6 +42,16 @@
         >
           Histórico <span class="history-count" id="historyCountBadge">0</span>
         </button>
+        <button
+          class="tab-button"
+          id="settingsTabButton"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="settingsTab"
+        >
+          Configurações
+        </button>
       </nav>
 
       <div id="exploreTab" role="tabpanel" aria-labelledby="exploreTabButton">
@@ -51,7 +61,7 @@
             <p class="section-kicker">Entrada</p>
             <h2 id="search-title">Coordenadas ICRS</h2>
           </div>
-          <p class="fixed-config">D3 · recorte 45′ → janela 30′ · máximo 100 frames</p>
+          <p class="fixed-config" id="fixedConfig">recorte 45′ → janela 30′ · 293 px · máximo 100 frames</p>
         </div>
 
         <form id="searchForm">
@@ -63,11 +73,33 @@
             <span>Declinação · Dec</span>
             <input id="decInput" name="dec" type="number" step="any" min="-90" max="90" value="-7.245147222" required />
           </label>
+          <fieldset class="band-selector">
+            <legend>Bandas espectrais</legend>
+            <div class="band-options" id="bandOptions">
+              <label><input type="checkbox" name="bandpass" value="SPHEREx-D1" checked /><span>D1</span><small>0,744–1,116 µm</small></label>
+              <label><input type="checkbox" name="bandpass" value="SPHEREx-D2" /><span>D2</span><small>1,099–1,651 µm</small></label>
+              <label><input type="checkbox" name="bandpass" value="SPHEREx-D3" checked /><span>D3</span><small>1,636–2,421 µm</small></label>
+              <label><input type="checkbox" name="bandpass" value="SPHEREx-D4" /><span>D4</span><small>2,423–3,822 µm</small></label>
+              <label><input type="checkbox" name="bandpass" value="SPHEREx-D5" /><span>D5</span><small>3,809–4,420 µm</small></label>
+              <label><input type="checkbox" name="bandpass" value="SPHEREx-D6" /><span>D6</span><small>4,412–5,002 µm</small></label>
+            </div>
+            <div class="band-actions">
+              <button type="button" id="selectAllBands">Selecionar todas</button>
+              <button type="button" id="clearBands">Limpar</button>
+            </div>
+          </fieldset>
+          <label>
+            <span>Resultado</span>
+            <select id="outputInput" name="output">
+              <option value="image" selected>Imagem · sequência temporal</option>
+              <option value="spectrum">Espectro · todas as observações</option>
+            </select>
+          </label>
           <label>
             <span>Estratégia temporal</span>
             <select id="modeInput" name="mode">
-              <option value="fast">Rápida · melhor bloco de até 4</option>
-              <option value="balanced" selected>Balanceada · até 12 épocas</option>
+              <option value="fast" selected>Rápida · melhor bloco de até 4</option>
+              <option value="balanced">Balanceada · até 12 épocas</option>
               <option value="full">Completa · todas as épocas</option>
             </select>
           </label>
@@ -113,14 +145,31 @@
           </div>
         </div>
 
+        <div class="render-toolbar">
+          <div class="render-group">
+            <span class="render-label" id="profileLabel">Renderização</span>
+            <div class="segmented" id="profileButtons" role="radiogroup" aria-labelledby="profileLabel"></div>
+          </div>
+          <div class="render-group">
+            <span class="render-label" id="colorModeLabel">Cor</span>
+            <div class="segmented" id="colorModeButtons" role="radiogroup" aria-labelledby="colorModeLabel">
+              <button type="button" role="radio" data-color-mode="color" aria-checked="true">Falsa cor</button>
+              <button type="button" role="radio" data-color-mode="mono" aria-checked="false">Monocromático</button>
+            </div>
+          </div>
+        </div>
+        <p class="render-hint" id="profileHint">—</p>
+
         <div class="image-stage">
-          <img id="frameImage" alt="Frame temporal SPHEREx" />
+          <div class="frame-layers" id="frameLayers" aria-label="Composição multibanda SPHEREx"></div>
           <div class="loading-overlay" id="loadingOverlay" hidden>
             <span class="spinner" aria-hidden="true"></span>
             <strong id="loadingTitle">Carregando primeira imagem…</strong>
             <small>Todos os FITS da sequência serão preparados em segundo plano.</small>
           </div>
         </div>
+
+        <div class="layer-legend" id="layerLegend" aria-label="Camadas da composição"></div>
 
         <div class="frame-metadata">
           <div>
@@ -139,6 +188,13 @@
             <span>Frames / alinhamento</span>
             <strong id="availableCount">—</strong>
           </div>
+          <div>
+            <span>Cor e renderização</span>
+            <strong class="spectral-value">
+              <i class="color-swatch" id="colorSwatch" aria-hidden="true"></i>
+              <span id="spectralInfo">—</span>
+            </strong>
+          </div>
         </div>
 
         <div class="timeline-controls">
@@ -149,7 +205,67 @@
         </div>
         <p class="slider-hint">Arraste livremente; frames ainda em processamento aparecem automaticamente assim que ficarem prontos.</p>
         </section>
+
+        <section class="spectrum-panel" id="spectrumPanel" aria-labelledby="spectrum-title" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Espectro</p>
+              <h2 id="spectrum-title">Fluxo × comprimento de onda</h2>
+            </div>
+            <p class="fixed-config">recorte 4′ por observação · abertura 3 px · fundo local</p>
+          </div>
+          <div class="spectrum-progress" id="spectrumProgress"></div>
+          <figure class="spectrum-figure" id="spectrumCombined" hidden>
+            <img id="spectrumCombinedImage" alt="Espectro SPHEREx com as bandas selecionadas sobrepostas" />
+          </figure>
+          <div class="spectrum-grid" id="spectrumBands"></div>
+          <p class="spectrum-note">
+            Cada ponto é uma observação: o filtro do SPHEREx varia ao longo do detector, então o alvo cai
+            em um λ diferente a cada visita. A linha é a mediana por canal (17 por banda). Fontes com
+            movimento próprio alto (ex.: WISE 0855) saem da abertura ao longo dos meses.
+          </p>
+        </section>
       </div>
+
+      <section
+        class="settings-panel"
+        id="settingsTab"
+        role="tabpanel"
+        aria-labelledby="settingsTabButton"
+        hidden
+      >
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Recorte e resolução</p>
+            <h2>Configurações</h2>
+          </div>
+          <button class="primary-button" id="applySettingsButton" type="button">Aplicar e buscar</button>
+        </div>
+
+        <fieldset class="settings-group">
+          <legend>Campo de visão (janela final)</legend>
+          <p class="settings-help">
+            O recorte baixado do IRSA é sempre 1,5× a janela, para que a reprojeção e a
+            correção de deslocamento nunca deixem cantos sem dados.
+          </p>
+          <div class="option-cards" id="fovOptions"></div>
+        </fieldset>
+
+        <fieldset class="settings-group">
+          <legend>Amostragem da grade</legend>
+          <div class="option-cards" id="samplingOptions"></div>
+        </fieldset>
+
+        <div class="settings-note">
+          <strong>Sobre “qualidade”</strong>
+          <p>
+            O detalhe máximo é fixado pelo instrumento: cada pixel do SPHEREx cobre ~6,2″ do céu.
+            Um FOV maior mostra mais céu com mais pixels, mas o mesmo detalhe por objeto; um FOV menor
+            é um “zoom” com menos pixels. A amostragem 2× interpola a grade para 3,08″/px: a imagem fica
+            menos serrilhada na tela, mas não ganha informação nova.
+          </p>
+        </div>
+      </section>
 
       <section
         class="history-panel"

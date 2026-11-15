@@ -34,7 +34,10 @@ código.
 - `build_common_sky_grid`: cria uma grade TAN quadrada, norte-para-cima e com o
   RA/Dec solicitado exatamente no pixel central;
 - `align_fits_image`: reprojeta a WCS/SIP de cada observação para a grade comum
-  e mede a fração efetivamente coberta;
+  e mede a fração efetivamente coberta; quando o FITS fornece `WCS-WAVE`, o
+  mapa calibrado de comprimento de onda por pixel é reprojetado junto;
+- `spectral_color`: descreve D1–D6 e translada 0,744–5,002 µm para a faixa
+  visível de exibição 420–640 nm em escala logarítmica;
 - `SpherexImageService.create_preview`: recebe RA, Dec e FOV, seleciona uma
   observação compatível, baixa o cutout e devolve a imagem com seus metadados.
 - `SpherexTemporalSequenceService.create_sequence`: recebe RA e Dec, consulta o
@@ -54,9 +57,56 @@ código.
 O motor temporal reprojeta todos os frames para a mesma grade TAN e retorna
 `aligned: true`. A correção usa a WCS completa de cada FITS, incluindo a
 distorção SIP quando presente, em vez de supor um deslocamento uniforme em RA,
-Dec ou pixels. Os FITS ficam em cache por combinação de coordenadas, banda,
+Dec ou pixels. As sequências usam escala fixa de 6,15 segundos de arco por pixel,
+permitindo sobrepor D1–D6 na mesma grade sem redimensionamento posterior. Os FITS
+ficam em cache por combinação de coordenadas, banda,
 coleções e período. O cache de previews possui versão própria; imagens antigas
 sem alinhamento são regeneradas automaticamente.
+
+Os frames temporais são WebPs RGBA de falsa cor. A intensidade continua vindo
+da extensão científica monocromática; somente a representação web recebe cor e
+opacidade 0,82. A cor é calculada por pixel a partir de `WCS-WAVE`. Em arquivos
+sem esse mapa, é usado o centro geométrico da banda selecionada. A transformação
+logarítmica preserva espaçamentos fracionários `Δλ/λ`; o limite visual de 640 nm
+evita que D5 e D6 colapsem para o mesmo vermelho no gamut sRGB. Essa cor não
+representa luz visível medida pelo SPHEREx.
+
+### Perfis de renderização (`frame_generator.RENDER_PROFILES`)
+
+Escolhas de exibição aplicadas igualmente a todas as épocas e bandas; o FITS e a
+matriz alinhada não mudam:
+
+| Perfil | Fundo | Ponto preto | Curva | Extra |
+|---|---|---|---|---|
+| `original` | nenhum | percentil 1 | asinh a=0,1 | comportamento anterior |
+| `limpa` | local (malha ~1/6 da imagem, sigma-clipping) | 0,5σ do ruído | asinh a=0,2 | núcleos saturados preenchidos |
+| `suave` | local | 0,5σ | asinh a=0,2 | gaussiana 0,8 px |
+| `difusa` | só nível global | mediana | asinh a=0,15 | gaussiana 0,5 px; preserva nebulosidade |
+| `pontual` | local | 2,5σ | raiz quadrada | quase só fontes compactas |
+
+O fundo local remove a luz zodiacal (não subtraída na extensão `IMAGE`) e
+gradientes suaves; fontes compactas são rejeitadas por sigma-clipping. Por isso
+`limpa`/`pontual` atenuam emissão estendida maior que ~1/6 do campo; para
+nebulosas, use `difusa`. Núcleos saturados (NaN cercados por pixels válidos, até
+64 px) recebem o maior valor vizinho só na imagem. O intervalo de exibição do
+primeiro frame é reutilizado em todas as épocas de cada variante
+(`perfil-cor`), então comparações temporais continuam válidas.
+
+### Espectro (`spectrum_service`, `spectrum_chart`)
+
+`SpherexSpectrumService.spectrum(ra_deg, dec_deg, bandpasses, output_directory)`
+mede o alvo em todas as observações das bandas pedidas (fotometria de abertura
+com fundo local, λ do `WCS-WAVE` no pixel do alvo, erro pela `VARIANCE`) e grava
+SVGs (`spectrum_chart.render_spectrum_svg`, sem matplotlib) com nome por hash de
+conteúdo. `IrsaClient.download_hdus` baixa o cutout só até a extensão pedida.
+No FastAPI, `POST /receber-dados` com `elemento: "espectro"` inicia um job
+(`spectrum_jobs.SpectrumJobManager`, compartilhado com o laboratório, que usa
+`output: "spectrum"`); `GET /espectros/<id>` acompanha e
+`GET /espectros/arquivos/...svg` serve os gráficos. Contrato em `docs/api.md`.
+
+Limitações: sem propagação de movimento próprio (alvos rápidos saem da
+abertura), sem correção de abertura (valor absoluto alguns % abaixo; forma
+preservada) e FLAGS não usadas até termos a tabela oficial de bits.
 
 O FITS continua sendo a fonte científica. Os frames são derivados para exibição.
 Na comparação entre épocas, todos os frames devem usar o mesmo intervalo

@@ -186,6 +186,10 @@ class TemporalSequenceServiceTests(unittest.TestCase):
 
         self.assertFalse(frame.cache_hit)
         self.assertTrue(frame.frame.aligned)
+        self.assertTrue(frame.frame.colorized)
+        self.assertEqual(frame.frame.color_model, "SPHEREx log-λ false color")
+        self.assertAlmostEqual(frame.frame.opacity, 0.82)
+        self.assertIsNotNone(frame.frame.wavelength_median_um)
         self.assertEqual(frame.frame.center_ra_deg, TARGET_RA)
         self.assertEqual(frame.frame.center_dec_deg, TARGET_DEC)
         self.assertTrue(cached_frame.cache_hit)

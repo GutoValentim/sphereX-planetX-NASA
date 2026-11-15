@@ -10,6 +10,14 @@ from .image_aligner import (
 )
 from .image_service import PreviewImageResult, SpherexImageService
 from .irsa_client import IrsaClient
+from .spectral_color import (
+    FALSE_COLOR_OPACITY,
+    SPHEREX_BANDS,
+    SpherexBand,
+    get_spherex_band,
+    infrared_to_rgb,
+    infrared_to_visible_nm,
+)
 from .temporal_sequence_service import (
     LazyFrameResult,
     SequenceLimitExceeded,
@@ -26,14 +34,20 @@ __all__ = [
     "IrsaClient",
     "LazyFrameResult",
     "PreviewImageResult",
+    "SpherexBand",
     "SpherexImageService",
     "SequenceLimitExceeded",
     "SpherexTemporalSequenceService",
     "TemporalDataset",
     "TemporalFrame",
     "TemporalSequenceResult",
+    "FALSE_COLOR_OPACITY",
+    "SPHEREX_BANDS",
     "generate_frame",
     "generate_frame_from_array",
+    "get_spherex_band",
+    "infrared_to_rgb",
+    "infrared_to_visible_nm",
     "align_fits_image",
     "build_common_sky_grid",
     "inspect_fits",
