@@ -33,6 +33,16 @@ repetir a mesma coordenada responde do cache em milissegundos.
 
 Ambos os métodos encaminham a consulta para o serviço Python e repassam o status e o JSON recebidos. Parâmetros GET inválidos retornam 400; sem `PYTHON_API_URL` a rota retorna 503, 502 se o Python estiver inacessível e 504 em timeout (30 s).
 
+### Catálogo de alvos pré-mapeados (laboratório)
+
+Somente leitura, servido a partir das exportações do laboratório (`dev/temporal-lab`), montadas na API em `SPHEREX_CATALOG_DIR` (produção: `/opt/docker/spherex/lab/exports` → `/catalog:ro`). Sem `SPHEREX_CATALOG_DIR`, as rotas respondem 503.
+
+- `GET /api/catalogo/index.json`: `{ "schema": "spherex-catalog/1", "targets": [ { "id", "slug", "name", "description", "ra_deg", "dec_deg", "manifest", "sequences", "spectrum_themes", "exported_at", "engine" } ] }`. Junta os motores (`v1`, `v2`…); para cada alvo vale a exportação do motor mais novo. Ordenado por nome; `Cache-Control: max-age=30`.
+- `GET /api/catalogo/<slug>/manifest.json`: manifesto `spherex-lab-target/1` (ver `dev/temporal-lab/README.md`): `sequences[].frames[].layers[]` no formato de `/api/sequencias/<id>` e `spectrum.dark|light` no formato de `/api/espectros/<id>`. As URLs dentro dele são relativas à pasta do alvo.
+- `GET /api/catalogo/<slug>/<caminho>`: arquivos do alvo (`.webp`, `.svg`, `.json`) do mesmo motor do manifesto. Caminhos fora do padrão → 404.
+
+O frontend usa `/api/catalogo` por padrão (`VITE_CATALOG_URL` sobrescreve; vazio desliga). Os alvos aparecem no mapa do céu, na busca por coordenadas e na tela de imagem à medida que o laboratório os exporta.
+
 O frontend em produção também possui `GET /healthz` com `service: spherex-frontend` e o SHA da release. Esses endpoints indicam disponibilidade dos processos Node, sem afirmar que a análise científica ou o Python estão prontos.
 
 ## Python (FastAPI, porta 8000, somente rede interna)

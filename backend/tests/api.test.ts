@@ -176,3 +176,60 @@ test('image consultation forwards sequence options and exposes frames through /a
   assert.equal((await fetch(`${url}/api/sequencias/arquivos/0123456789abcdef/fits/x/a.fits`)).status, 404);
   assert.equal((await fetch(`${url}/api/consulta?RA=10&DEC=-5&Data=2026-11-14&modo=a%20b`)).status, 400);
 });
+test('catalog merges lab exports, newest engine first, and serves only target files', async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = await mkdtemp(join(tmpdir(), 'spherex-catalog-'));
+  try {
+    const target = (id: string, slug: string, name: string) => ({ id, slug, name, ra_deg: 1, dec_deg: 2, manifest: `${slug}/manifest.json` });
+    await mkdir(join(root, 'v1', 'vega-aaa', 'frames'), { recursive: true });
+    await mkdir(join(root, 'v2', 'vega-aaa'), { recursive: true });
+    await writeFile(join(root, 'v1', 'index.json'), JSON.stringify({ targets: [target('aaa', 'vega-aaa', 'Vega'), target('bbb', 'altair-bbb', 'Altair'), { id: 'x', slug: '../etc' }] }));
+    await writeFile(join(root, 'v2', 'index.json'), JSON.stringify({ targets: [target('aaa', 'vega-aaa', 'Vega v2')] }));
+    await writeFile(join(root, 'v1', 'vega-aaa', 'manifest.json'), '{"engine":"v1"}');
+    await writeFile(join(root, 'v1', 'vega-aaa', 'frames', 'a.webp'), 'webp');
+    await writeFile(join(root, 'v2', 'vega-aaa', 'manifest.json'), '{"engine":"v2"}');
+    await writeFile(join(root, 'CREDENTIALS.txt'), 'secret');
+
+    const url = await listen(createServer(createApp({ catalogDir: root })));
+    const index = await (await fetch(`${url}/api/catalogo/index.json`)).json();
+    assert.deepEqual(index.targets.map((item: { name: string; engine: string }) => `${item.name}@${item.engine}`), ['Altair@v1', 'Vega v2@v2']);
+
+    const manifest = await fetch(`${url}/api/catalogo/vega-aaa/manifest.json`);
+    assert.equal(manifest.status, 200);
+    assert.deepEqual(await manifest.json(), { engine: 'v2' });
+    // The newest engine owns the target: files it did not export are not mixed in from older ones.
+    assert.equal((await fetch(`${url}/api/catalogo/vega-aaa/frames/a.webp`)).status, 404);
+    for (const path of ['vega-aaa/..%2F..%2FCREDENTIALS.txt', 'vega-aaa/../../CREDENTIALS.txt', 'Vega/manifest.json', 'vega-aaa/manifest.txt']) {
+      assert.equal((await fetch(`${url}/api/catalogo/${path}`)).status, 404, path);
+    }
+
+    const unconfigured = await listen(createServer(createApp({ catalogDir: '' })));
+    assert.equal((await fetch(`${unconfigured}/api/catalogo/index.json`)).status, 503);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+test('catalog serves exported images with their content type', async () => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = await mkdtemp(join(tmpdir(), 'spherex-catalog-'));
+  try {
+    await mkdir(join(root, 'v1', 'vega-aaa', 'frames', '30-native', 'limpa-color', 'D1'), { recursive: true });
+    await mkdir(join(root, 'v1', 'vega-aaa', 'spectrum', 'dark'), { recursive: true });
+    await writeFile(join(root, 'v1', 'vega-aaa', 'manifest.json'), '{}');
+    await writeFile(join(root, 'v1', 'vega-aaa', 'frames', '30-native', 'limpa-color', 'D1', '001_x.webp'), 'webp');
+    await writeFile(join(root, 'v1', 'vega-aaa', 'spectrum', 'dark', 'combined.svg'), '<svg/>');
+    const url = await listen(createServer(createApp({ catalogDir: root })));
+    const image = await fetch(`${url}/api/catalogo/vega-aaa/frames/30-native/limpa-color/D1/001_x.webp`);
+    assert.equal(image.status, 200);
+    assert.equal(image.headers.get('content-type'), 'image/webp');
+    const chart = await fetch(`${url}/api/catalogo/vega-aaa/spectrum/dark/combined.svg`);
+    assert.equal(chart.headers.get('content-type'), 'image/svg+xml');
+    assert.equal(await chart.text(), '<svg/>');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

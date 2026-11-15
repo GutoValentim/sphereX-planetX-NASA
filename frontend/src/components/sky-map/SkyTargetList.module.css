@@ -1,0 +1,111 @@
+/* "Mapped targets" list in the sky toolbar (UI_FEATURES.skyTargetList). */
+
+.root {
+  position: relative;
+}
+
+.count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  margin-left: var(--space-1);
+  padding: 0 var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-label);
+  background-color: var(--color-surface-muted);
+  border-radius: var(--radius-full);
+}
+
+.popover {
+  position: absolute;
+  bottom: calc(100% + var(--space-3));
+  left: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(20rem, calc(100vw - var(--space-6)));
+  max-height: min(24rem, 60vh);
+  padding: var(--space-2);
+  color: var(--color-text-primary);
+  background-color: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-md);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .popover {
+    animation: list-in var(--duration-fast, 150ms) var(--easing-standard, ease-out);
+  }
+}
+
+@keyframes list-in {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
+}
+
+.search {
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-3);
+  font: inherit;
+  color: inherit;
+  background-color: var(--color-surface);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+
+.item:hover,
+.item:focus-visible {
+  background-color: color-mix(in srgb, var(--color-text-primary) 7%, transparent);
+}
+
+.item:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+.name {
+  font-family: var(--font-ui);
+  font-weight: var(--font-weight-semibold);
+}
+
+.coords {
+  font-size: var(--font-size-label);
+  color: var(--color-text-secondary);
+}
+
+.empty {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-small);
+  color: var(--color-text-secondary);
+}

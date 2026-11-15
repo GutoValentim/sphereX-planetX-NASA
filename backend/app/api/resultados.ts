@@ -1,10 +1,13 @@
 import express from 'express';
+import { registerCatalog } from './catalogo.js';
 
 interface AppOptions {
   pythonApiUrl?: string;
   frontendOrigin?: string;
   gitSha?: string;
   pythonTimeoutMs?: number;
+  /** Pasta exports/ do laboratório (somente leitura): alvos pré-mapeados. */
+  catalogDir?: string;
 }
 
 export function createApp({
@@ -12,6 +15,7 @@ export function createApp({
   frontendOrigin = process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
   gitSha = process.env.GIT_SHA ?? 'development',
   pythonTimeoutMs = 30_000,
+  catalogDir = process.env.SPHEREX_CATALOG_DIR,
 }: AppOptions = {}) {
   const app = express();
   app.disable('x-powered-by');
@@ -158,5 +162,6 @@ export function createApp({
     }
     await relayFile(`/espectros/arquivos/${dataset}/spectrum/${file}`, 'image/svg+xml', res);
   });
+  registerCatalog(app, catalogDir);
   return app;
 }

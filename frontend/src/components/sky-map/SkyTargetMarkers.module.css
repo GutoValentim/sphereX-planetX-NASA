@@ -1,0 +1,253 @@
+/* Mapped targets on the sky sphere (UI_FEATURES.skyTargetMarkers). */
+
+.layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.target {
+  --size: calc(1.75rem * var(--target-scale, 1));
+
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--size);
+  height: var(--size);
+  margin: calc(var(--size) / -2) 0 0 calc(var(--size) / -2);
+  padding: 0;
+  color: var(--target-tone, var(--sky-target-1));
+  cursor: pointer;
+  pointer-events: auto;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-full);
+}
+
+.target[hidden] {
+  display: none;
+}
+
+.target:focus-visible {
+  outline: 2px solid var(--color-on-viewer);
+  outline-offset: 4px;
+}
+
+/* Soft glow around the dot. */
+.halo {
+  position: absolute;
+  inset: -45%;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, currentColor 55%, transparent) 0%,
+    color-mix(in srgb, currentColor 18%, transparent) 38%,
+    transparent 70%
+  );
+  border-radius: var(--radius-full);
+  opacity: 0.7;
+}
+
+.core {
+  position: absolute;
+  inset: 34%;
+  background: radial-gradient(circle, #fff 0%, currentColor 55%, color-mix(in srgb, currentColor 60%, transparent) 100%);
+  border-radius: var(--radius-full);
+  box-shadow:
+    0 0 6px 1px color-mix(in srgb, currentColor 80%, transparent),
+    0 0 14px 3px color-mix(in srgb, currentColor 35%, transparent);
+}
+
+/* Thin rings with a tiny satellite, turning at different speeds. */
+.orbit {
+  position: absolute;
+  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: var(--radius-full);
+}
+
+.orbit::after {
+  content: '';
+  position: absolute;
+  top: -1.5px;
+  left: 50%;
+  width: 3px;
+  height: 3px;
+  margin-left: -1.5px;
+  background: currentColor;
+  border-radius: var(--radius-full);
+  box-shadow: 0 0 4px currentColor;
+  opacity: 0.85;
+}
+
+.orbitA {
+  inset: 6%;
+}
+
+.orbitB {
+  inset: -22%;
+  border-style: dashed;
+  border-color: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.orbitB::after {
+  width: 2px;
+  height: 2px;
+  margin-left: -1px;
+  opacity: 0.6;
+}
+
+.target:hover .halo,
+.target[data-active] .halo {
+  opacity: 1;
+}
+
+.target:hover .orbit,
+.target[data-active] .orbit {
+  border-color: color-mix(in srgb, currentColor 45%, transparent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .halo {
+    animation: target-breathe var(--target-pulse, 3.2s) ease-in-out var(--target-delay, 0s) infinite;
+  }
+
+  .core {
+    animation: target-twinkle calc(var(--target-pulse, 3.2s) * 0.7) ease-in-out var(--target-delay, 0s) infinite;
+  }
+
+  .orbitA {
+    animation: target-spin var(--target-orbit-a, 9s) linear var(--target-delay, 0s) infinite;
+  }
+
+  .orbitB {
+    animation: target-spin var(--target-orbit-b, 14s) linear var(--target-delay, 0s) infinite reverse;
+  }
+
+  .target {
+    transition: filter var(--duration-fast) var(--easing-standard);
+  }
+
+  .target:hover,
+  .target[data-active] {
+    filter: brightness(1.25);
+  }
+}
+
+@keyframes target-breathe {
+  0%,
+  100% {
+    transform: scale(0.85);
+    opacity: 0.55;
+  }
+
+  50% {
+    transform: scale(1.15);
+    opacity: 0.95;
+  }
+}
+
+@keyframes target-twinkle {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+
+  50% {
+    filter: brightness(1.45);
+  }
+}
+
+@keyframes target-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Card shown on hover / focus / click. */
+.card {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(17rem, calc(100% - var(--space-6)));
+  padding: var(--space-4);
+  color: var(--color-text-primary);
+  pointer-events: auto;
+  background-color: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-md);
+}
+
+.card[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .card {
+    animation: card-in var(--duration-fast, 150ms) var(--easing-standard, ease-out);
+  }
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+}
+
+.cardHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.eyebrow {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-label);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--letter-spacing-label);
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.name {
+  margin: 0;
+  font-size: var(--font-size-h3);
+}
+
+.description {
+  margin: 0;
+  font-size: var(--font-size-small);
+  color: var(--color-text-secondary);
+}
+
+.coords {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+}
+
+.coords dt {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-label);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--letter-spacing-label);
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.coords dd {
+  margin: 0;
+  text-align: right;
+}
+
+.coords dd small {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-label);
+  color: var(--color-text-secondary);
+}

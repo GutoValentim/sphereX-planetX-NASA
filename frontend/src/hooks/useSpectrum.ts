@@ -11,10 +11,13 @@ export interface SpectrumState {
   progress: { done: number; total: number };
 }
 
-/** Starts the spectrum job the first time the chart is shown (it measures every observation). */
-export function useSpectrum(query: ObservationQuery, enabled: boolean): SpectrumState {
-  const key = `${query.raDeg}:${query.decDeg}`;
-  const start = useCallback((signal: AbortSignal) => startSpectrum(query, signal), [query]);
+/**
+ * Starts the spectrum job the first time the chart is shown (it measures every observation).
+ * Charts are rendered for `theme`; switching theme reuses the cached measurements.
+ */
+export function useSpectrum(query: ObservationQuery, enabled: boolean, theme: 'dark' | 'light' = 'dark'): SpectrumState {
+  const key = `${query.raDeg}:${query.decDeg}:${theme}`;
+  const start = useCallback((signal: AbortSignal) => startSpectrum(query, signal, theme), [query, theme]);
   const isDone = useCallback((snapshot: SpectrumSnapshot) => snapshot.status !== 'running', []);
   const { snapshot, error } = usePolledJob<SpectrumSnapshot>(key, enabled, start, isDone);
 

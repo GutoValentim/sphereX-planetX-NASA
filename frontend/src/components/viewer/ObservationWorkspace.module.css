@@ -112,3 +112,48 @@
     height: clamp(18rem, 55vh, 28rem);
   }
 }
+
+/* Side panel tabs: band controls / mapped targets (UI_FEATURES.viewerTargetsTab). */
+.sideTabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 2px;
+  background-color: var(--color-surface-muted);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+
+.sideTabs button {
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+
+.sideTabs button[aria-selected='true'] {
+  color: var(--color-text-primary);
+  background-color: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.sideTabs button:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus);
+  outline-offset: 1px;
+}
+
+.sidePanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sidePanel[hidden] {
+  display: none;
+}

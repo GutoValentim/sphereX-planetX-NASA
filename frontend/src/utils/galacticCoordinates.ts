@@ -47,3 +47,15 @@ export function galacticVectorToLongitudeLatitude(galactic: Vec3): { longitude: 
   if (longitude < 0) longitude += 360;
   return { longitude, latitude: Math.asin(galactic[2]) * DEG };
 }
+
+/** ICRS (J2000) position → unit direction in the sphere's world frame (inverse of the click path). */
+export function equatorialToWorldDirection(raDeg: number, decDeg: number): Vec3 {
+  const ra = raDeg / DEG;
+  const dec = decDeg / DEG;
+  const equatorial = [Math.cos(dec) * Math.cos(ra), Math.cos(dec) * Math.sin(ra), Math.sin(dec)];
+  const galactic = EQUATORIAL_TO_GALACTIC.map(
+    (row) => row[0] * equatorial[0] + row[1] * equatorial[1] + row[2] * equatorial[2],
+  );
+  // worldDirectionToGalactic maps [x, y, z] → [x, −z, y].
+  return [galactic[0], galactic[2], -galactic[1]];
+}

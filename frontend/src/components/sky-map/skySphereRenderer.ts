@@ -23,6 +23,17 @@ export interface SkyFrame {
   galacticLatitude: number;
   fovDeg: number;
   marker: SkyMarker | null;
+  /** Camera state in radians, so overlays can follow (or react to) the motion. */
+  view: { yaw: number; pitch: number; fov: number };
+}
+
+export interface FlyToOptions {
+  /** Where the target lands, as a fraction of the canvas size from its center (−0.1 = left/up). */
+  offset?: { x: number; y: number };
+  /** Final field of view in degrees (never zooms out). */
+  fovDeg?: number;
+  durationMs?: number;
+  onDone?: () => void;
 }
 
 interface SkySphereHandlers {
@@ -87,6 +98,14 @@ const PITCH_LIMIT = Math.PI / 2 - 0.001;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+}
+
+function wrapAngle(angle: number): number {
+  return Math.atan2(Math.sin(angle), Math.cos(angle));
 }
 
 interface Ellipse {
@@ -158,6 +177,7 @@ export class SkySphereRenderer {
   private pending = false;
   private frameId = 0;
   private loadToken = 0;
+  private flightId = 0;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -236,10 +256,76 @@ export class SkySphereRenderer {
   dispose(): void {
     this.disposed = true;
     window.cancelAnimationFrame(this.frameId);
+    this.cancelFlight();
     this.detachInteraction();
   }
 
+  /** Screen position (CSS px) of a world direction in the current view. */
+  project(world: Vec3): SkyMarker {
+    const { front, right, up } = this.basis();
+    return this.projectWith(world, front, right, up);
+  }
+
+  /** Animates the camera to a world direction, placing it at `offset` from the center. */
+  flyTo(world: Vec3, options: FlyToOptions = {}): void {
+    this.cancelFlight();
+    const { offset = { x: 0, y: 0 }, durationMs = 1400, onDone } = options;
+    const finalFov = clamp(Math.min(this.view.fov, ((options.fovDeg ?? 30) * Math.PI) / 180), MIN_FOV, MAX_FOV);
+    const end = this.solveView(world, finalFov, offset);
+    const start = { ...this.view };
+    const deltaYaw = wrapAngle(end.yaw - start.yaw);
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const duration = reduceMotion ? 0 : durationMs;
+    const startedAt = performance.now();
+
+    const step = (now: number) => {
+      if (this.disposed) return;
+      const t = duration ? Math.min(1, (now - startedAt) / duration) : 1;
+      const k = easeInOutCubic(t);
+      this.view.yaw = start.yaw + deltaYaw * k;
+      this.view.pitch = start.pitch + (end.pitch - start.pitch) * k;
+      this.view.fov = Math.exp(Math.log(start.fov) + (Math.log(finalFov) - Math.log(start.fov)) * k);
+      this.renderNow();
+      if (t < 1) {
+        this.flightId = window.requestAnimationFrame(step);
+      } else {
+        this.flightId = 0;
+        onDone?.();
+      }
+    };
+    this.flightId = window.requestAnimationFrame(step);
+  }
+
+  private cancelFlight(): void {
+    if (this.flightId) window.cancelAnimationFrame(this.flightId);
+    this.flightId = 0;
+  }
+
+  /** Yaw/pitch that put `world` at the requested screen offset with the given field of view. */
+  private solveView(world: Vec3, fov: number, offset: { x: number; y: number }) {
+    const saved = { ...this.view };
+    this.view.fov = fov;
+    this.view.yaw = Math.atan2(world[2], world[0]);
+    this.view.pitch = clamp(Math.asin(clamp(world[1], -1, 1)), -PITCH_LIMIT, PITCH_LIMIT);
+    const width = this.canvas.clientWidth;
+    const height = this.canvas.clientHeight;
+    const goalX = width / 2 + offset.x * width;
+    const goalY = height / 2 + offset.y * height;
+    // A few correction steps: pan by the remaining screen error until the target sits on the goal.
+    for (let iteration = 0; iteration < 4; iteration += 1) {
+      const at = this.project(world);
+      if (!at.visible && iteration > 0) break;
+      const radiansPerPixel = this.view.fov / Math.max(1, height);
+      this.view.yaw -= ((goalX - at.x) * radiansPerPixel) / Math.max(0.2, Math.cos(this.view.pitch));
+      this.view.pitch = clamp(this.view.pitch + (goalY - at.y) * radiansPerPixel, -PITCH_LIMIT, PITCH_LIMIT);
+    }
+    const result = { yaw: this.view.yaw, pitch: this.view.pitch };
+    Object.assign(this.view, saved);
+    return result;
+  }
+
   private readonly onPointerDown = (event: PointerEvent) => {
+    this.cancelFlight();
     this.canvas.setPointerCapture(event.pointerId);
     this.pointers.set(event.pointerId, { x: event.offsetX, y: event.offsetY });
     this.tap = this.pointers.size === 1 ? { x: event.offsetX, y: event.offsetY } : null;
@@ -285,6 +371,7 @@ export class SkySphereRenderer {
 
   private readonly onWheel = (event: WheelEvent) => {
     event.preventDefault();
+    this.cancelFlight();
     this.zoom(Math.exp(event.deltaY * 0.001), event.offsetX, event.offsetY);
   };
 
@@ -418,12 +505,17 @@ export class SkySphereRenderer {
       galacticLatitude: Math.asin(front[1]) * (180 / Math.PI),
       fovDeg: this.view.fov * (180 / Math.PI),
       marker: this.target ? this.markerPosition(front, right, up) : null,
+      view: { ...this.view },
     });
   }
 
   private markerPosition(front: Vec3, right: Vec3, up: Vec3): SkyMarker {
     const target = this.target;
     if (!target) return { x: 0, y: 0, visible: false };
+    return this.projectWith(target, front, right, up);
+  }
+
+  private projectWith(target: Vec3, front: Vec3, right: Vec3, up: Vec3): SkyMarker {
     const width = this.canvas.clientWidth;
     const height = this.canvas.clientHeight;
     const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
