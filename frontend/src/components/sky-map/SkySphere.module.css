@@ -230,7 +230,7 @@
 }
 
 .canvasDim {
-  --sky-filter-dim: brightness(0.42) saturate(0.85);
+  --sky-filter-dim: brightness(0.55) saturate(0.88);
 }
 
 .canvasSoft,
