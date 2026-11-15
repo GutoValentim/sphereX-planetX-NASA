@@ -1,0 +1,8 @@
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(2.5rem, 6vh, 4.5rem);
+  max-width: 68rem;
+  margin: 0 auto;
+  padding: var(--space-8) var(--layout-gutter) var(--space-8);
+}

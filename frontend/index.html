@@ -1,10 +1,27 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#101b2e" />
-    <title>SPHEREx Time Explorer</title>
+    <meta
+      name="description"
+      content="Sky Explorer — explore SPHEREx astronomical observations by celestial coordinates and date."
+    />
+    <title>Sky Explorer</title>
+    <script>
+      // Applies the theme before React mounts to avoid a flash of the wrong theme.
+      // The storage key must match THEME_STORAGE_KEY in src/utils/themePreference.ts.
+      (function () {
+        try {
+          var stored = localStorage.getItem('sky-explorer-theme');
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var theme = stored === 'light' || stored === 'dark' ? stored : prefersDark ? 'dark' : 'light';
+          document.documentElement.dataset.theme = theme;
+        } catch (error) {
+          document.documentElement.dataset.theme = 'light';
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -1,30 +1,36 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense } from 'react';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import LoadingState from './components/common/LoadingState';
+import PageContainer from './components/layout/PageContainer';
+import Home from './pages/Home';
+import ExploreTheSky from './pages/ExploreTheSky';
+import NotFound from './pages/NotFound';
+import { ROUTES } from './routes/paths';
+import ScrollToTop from './routes/ScrollToTop';
 
-export default function App() {
-  const [status, setStatus] = useState('Verificando conexão com a API…');
-  const apiUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch(`${apiUrl}/healthz`, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('API indisponível');
-        await response.json();
-        setStatus('API conectada');
-      })
-      .catch(() => { if (!controller.signal.aborted) setStatus('Não foi possível conectar à API.'); });
-    return () => controller.abort();
-  }, [apiUrl]);
+/** The viewer page pulls in the sky viewer and chart integrations, so it is loaded on demand. */
+const SeeTheSky = lazy(() => import('./pages/SeeTheSky'));
+
+function App() {
   return (
-    <main>
-      <p className="eyebrow">NASA SPACE APPS CHALLENGE · PLANET X</p>
-      <h1>SPHEREx<br /><span>Time Explorer</span></h1>
-      <p>Um novo olhar sobre o céu, ao longo do tempo.</p>
-      <section aria-label="Status do projeto">
-        <h2>Ambiente de desenvolvimento publicado</h2>
-        <p>A experiência de exploração está em construção.</p>
-        <p role="status">{status}</p>
-        <a href={`${apiUrl}/healthz`}>Verificar disponibilidade da API ↗</a>
-      </section>
-    </main>
+    <BrowserRouter>
+      <ScrollToTop />
+      <Suspense
+        fallback={
+          <PageContainer>
+            <LoadingState message="Loading page…" />
+          </PageContainer>
+        }
+      >
+        <Routes>
+          <Route path={ROUTES.home} element={<Home />} />
+          <Route path={ROUTES.explore} element={<ExploreTheSky />} />
+          <Route path={ROUTES.viewer} element={<SeeTheSky />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
+    </BrowserRouter>
   );
 }
+
+export default App;
