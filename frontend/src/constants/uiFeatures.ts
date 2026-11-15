@@ -9,6 +9,8 @@ export const UI_FEATURES = {
   skyDarkBackground: true,
   /** Sky map: galactic grid drawn as dotted lines (skySphereRenderer → uDotted). */
   skyGridDotted: true,
+  /** Sky map: opening move, a zoomed view that sweeps out after 2 s to show the sky can be dragged (SkySphere). */
+  skyIntroAnimation: true,
   /** Sky map: tiny floating dust particles drifting slowly (SkyDust). */
   skyDust: true,
   /** Sky map: dust particles lag and drift when the view moves, like inertia (SkyDust). */

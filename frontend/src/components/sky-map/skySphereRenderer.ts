@@ -99,12 +99,21 @@ void main() {
 }`;
 
 const DEG_TO_RAD = Math.PI / 180;
-const INITIAL_FOV = 120 * DEG_TO_RAD;
-/**
- * Start (and "Recenter") view: galactic lon 354.27°, lat −20.10°, FOV 120°.
- * The readout's longitude is −yaw and its latitude is the pitch.
- */
-const HOME_VIEW = { yaw: -354.27 * DEG_TO_RAD, pitch: -20.1 * DEG_TO_RAD, fov: INITIAL_FOV };
+
+export interface CameraView {
+  yaw: number;
+  pitch: number;
+  fov: number;
+}
+
+/** Camera view from the readout's galactic values (degrees): longitude is −yaw, latitude is the pitch. */
+export function galacticView(longitudeDeg: number, latitudeDeg: number, fovDeg: number): CameraView {
+  return { yaw: -longitudeDeg * DEG_TO_RAD, pitch: latitudeDeg * DEG_TO_RAD, fov: fovDeg * DEG_TO_RAD };
+}
+
+/** Home view (default start and "Recenter"): galactic lon 301.29°, lat −15.98°, FOV 72°. */
+export const HOME_VIEW = galacticView(301.29, -15.98, 72);
+
 const MIN_FOV = (2 * Math.PI) / 180;
 const MAX_FOV = (120 * Math.PI) / 180;
 const PITCH_LIMIT = Math.PI / 2 - 0.001;
@@ -115,6 +124,11 @@ function clamp(value: number, min: number, max: number): number {
 
 function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+}
+
+/** Starts moving at once and settles gently. */
+export function easeOutCubic(t: number): number {
+  return 1 - (1 - t) ** 3;
 }
 
 function wrapAngle(angle: number): number {
@@ -193,11 +207,14 @@ export class SkySphereRenderer {
   private frameId = 0;
   private loadToken = 0;
   private flightId = 0;
+  private interacted = false;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
     handlers: SkySphereHandlers,
+    initialView: CameraView = HOME_VIEW,
   ) {
+    Object.assign(this.view, initialView);
     const gl = canvas.getContext('webgl', { antialias: false });
     if (!gl) throw new Error('WebGL is not available');
     this.gl = gl;
@@ -289,8 +306,18 @@ export class SkySphereRenderer {
     this.animateTo({ ...end, fov: finalFov }, durationMs, onDone);
   }
 
-  /** Eased camera move (shortest way around in yaw, log-scale zoom). */
-  private animateTo(end: { yaw: number; pitch: number; fov: number }, durationMs: number, onDone?: () => void): void {
+  /** True once the user has dragged, zoomed or used the keyboard on the sky. */
+  get hasInteracted(): boolean {
+    return this.interacted;
+  }
+
+  /** Eased camera move (shortest way around in yaw, log-scale zoom). User input cancels it. */
+  animateTo(
+    end: { yaw: number; pitch: number; fov: number },
+    durationMs: number,
+    onDone?: () => void,
+    easing: (t: number) => number = easeInOutCubic,
+  ): void {
     this.cancelFlight();
     const start = { ...this.view };
     const deltaYaw = wrapAngle(end.yaw - start.yaw);
@@ -301,7 +328,7 @@ export class SkySphereRenderer {
     const step = (now: number) => {
       if (this.disposed) return;
       const t = duration ? Math.min(1, (now - startedAt) / duration) : 1;
-      const k = easeInOutCubic(t);
+      const k = easing(t);
       this.view.yaw = start.yaw + deltaYaw * k;
       this.view.pitch = start.pitch + (end.pitch - start.pitch) * k;
       this.view.fov = Math.exp(Math.log(start.fov) + (Math.log(end.fov) - Math.log(start.fov)) * k);
@@ -345,6 +372,7 @@ export class SkySphereRenderer {
   }
 
   private readonly onPointerDown = (event: PointerEvent) => {
+    this.interacted = true;
     this.cancelFlight();
     this.canvas.setPointerCapture(event.pointerId);
     this.pointers.set(event.pointerId, { x: event.offsetX, y: event.offsetY });
@@ -391,6 +419,7 @@ export class SkySphereRenderer {
 
   private readonly onWheel = (event: WheelEvent) => {
     event.preventDefault();
+    this.interacted = true;
     this.cancelFlight();
     this.zoom(Math.exp(event.deltaY * 0.001), event.offsetX, event.offsetY);
   };
@@ -404,6 +433,8 @@ export class SkySphereRenderer {
     else if (event.key === '+' || event.key === '=') this.zoomBy(0.9);
     else if (event.key === '-' || event.key === '_') this.zoomBy(1.1);
     else return;
+    this.interacted = true;
+    this.cancelFlight();
     event.preventDefault();
   };
 
