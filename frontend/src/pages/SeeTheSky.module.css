@@ -4,8 +4,3 @@
   margin-top: var(--space-7);
 }
 
-.modeRow {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: var(--space-4);
-}

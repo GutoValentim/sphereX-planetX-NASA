@@ -74,3 +74,29 @@
   font-size: var(--font-size-label);
   color: var(--color-text-secondary);
 }
+
+/* In the side rail (under Image/Chart and SPHEREx/DSS2). */
+.rail {
+  margin-left: 0;
+}
+
+.rail .trigger {
+  width: 100%;
+  min-height: var(--control-height-sm);
+  padding: var(--space-2);
+  font-size: var(--font-size-xs);
+  line-height: 1.2;
+  color: var(--color-text-secondary);
+  background-color: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.rail .trigger:hover {
+  color: var(--color-text-primary);
+}
+
+.rail .trigger[aria-expanded='true'] {
+  color: var(--color-on-primary);
+  background-color: var(--color-primary);
+}

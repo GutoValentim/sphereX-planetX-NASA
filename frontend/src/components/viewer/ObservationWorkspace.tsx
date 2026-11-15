@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AladinViewer from './AladinViewer';
+import ImageSourceToggle, { type ImageSource } from './ImageSourceToggle';
 import MappedTargetsPanel from './MappedTargetsPanel';
 import MonochromePanel from './MonochromePanel';
 import ObservationMetadata from './ObservationMetadata';
@@ -33,7 +34,6 @@ import styles from './ObservationWorkspace.module.css';
 const DISPLAY_BANDS = SPECTRAL_BANDS.filter((band) => band.id !== DEFAULT_SPECTRAL_BAND);
 const DISPLAY_BAND_IDS = DISPLAY_BANDS.map((band) => band.id);
 
-type ImageSource = 'spherex' | 'reference';
 type SideTab = 'bands' | 'targets';
 
 const SHOW_TARGETS_TAB = UI_FEATURES.viewerTargetsTab && CATALOG_ENABLED;
@@ -56,6 +56,9 @@ function ObservationWorkspace({ query, targetSlug = null }: ObservationWorkspace
   // Heavy views start on first use and then stay mounted, so switching back is instant.
   const [referenceRequested, setReferenceRequested] = useState(false);
   const [chartRequested, setChartRequested] = useState(false);
+  // "Try again" after an archive error restarts the live jobs.
+  const [imageAttempt, setImageAttempt] = useState(0);
+  const [spectrumAttempt, setSpectrumAttempt] = useState(0);
 
   const { selectedBandIds, toggleBand, selectAll, clearAll } = useBandSelection(DISPLAY_BAND_IDS);
   const target = useCatalogManifest(targetSlug);
@@ -64,8 +67,8 @@ function ObservationWorkspace({ query, targetSlug = null }: ObservationWorkspace
   const imagesFromTarget = targetLoading || (target.manifest?.sequences.length ?? 0) > 0;
   const spectrumFromTarget =
     targetLoading || Boolean(target.manifest && galleryFromManifest(target.manifest, theme));
-  const colorSource = useObservationFrames(query, 'falsa', !imagesFromTarget);
-  const monoSource = useObservationFrames(query, 'mono', monoRequested && !imagesFromTarget);
+  const colorSource = useObservationFrames(query, 'falsa', !imagesFromTarget, imageAttempt);
+  const monoSource = useObservationFrames(query, 'mono', monoRequested && !imagesFromTarget, imageAttempt);
   const targetSource = useMemo<ObservationFrameSource>(() => {
     if (!target.manifest) return { frames: [], isDemo: false, status: 'loading' };
     return { frames: manifestFrames(target.manifest, monochrome ? 'mono' : 'color'), isDemo: false, status: 'ready' };
@@ -79,7 +82,7 @@ function ObservationWorkspace({ query, targetSlug = null }: ObservationWorkspace
     }
   }, [imagesFromTarget, colorSource.status, colorSource.frames, query]);
   const timeline = useTimeline(source.frames, { preferredDate: query.observationDate });
-  const spectrum = useSpectrum(query, chartRequested && !spectrumFromTarget, theme);
+  const spectrum = useSpectrum(query, chartRequested && !spectrumFromTarget, theme, spectrumAttempt);
   const spectrumGallery = useMemo(() => {
     if (spectrumFromTarget) return target.manifest ? galleryFromManifest(target.manifest, theme) : null;
     return spectrum.snapshot?.result ? galleryFromLiveSpectrum(spectrum.snapshot.result) : null;
@@ -109,14 +112,31 @@ function ObservationWorkspace({ query, targetSlug = null }: ObservationWorkspace
     navigate({ pathname: ROUTES.viewer, search: `?${params}` });
   };
 
-  const spectrumProgress = spectrum.progress.total
-    ? ` (${spectrum.progress.done}/${spectrum.progress.total} observations)`
-    : '';
   const spectrumLoading = spectrumFromTarget
     ? 'Loading the mapped spectrum…'
     : spectrum.status === 'loading'
-      ? `Measuring the target in every SPHEREx observation${spectrumProgress}… a new coordinate takes 1–2 minutes.`
+      ? 'Measuring the target in every SPHEREx observation…'
       : null;
+
+  // While a live job renders, each band is usable only once all its epochs are ready.
+  const liveRendering = !imagesFromTarget && (source.status === 'loading' || source.status === 'rendering');
+  const bandProgress = useMemo(() => {
+    if (!liveRendering) return undefined;
+    const progress: Record<string, { done: number; total: number }> = {};
+    for (const band of DISPLAY_BANDS) progress[band.id] = { done: 0, total: 0 };
+    for (const frame of source.frames) {
+      for (const layer of frame.layers ?? []) {
+        const entry = progress[layer.bandId];
+        if (!entry) continue;
+        entry.total += 1;
+        if (layer.imageUrl || layer.error) entry.done += 1;
+      }
+    }
+    return progress;
+  }, [liveRendering, source.frames]);
+
+  // Layout: square SPHEREx image, wide reference sky, or the full-width spectrum.
+  const layout = viewMode === 'chart' ? 'chart' : imageSource === 'reference' ? 'reference' : 'spherex';
 
   const bandControls = (
     <>
@@ -126,6 +146,7 @@ function ObservationWorkspace({ query, targetSlug = null }: ObservationWorkspace
         onToggle={toggleBand}
         onSelectAll={selectAll}
         onClearAll={clearAll}
+        bandProgress={bandProgress}
       />
       <MonochromePanel
         enabled={monochrome}
@@ -139,8 +160,8 @@ function ObservationWorkspace({ query, targetSlug = null }: ObservationWorkspace
 
   return (
     <div className={styles.workspace}>
-      <div className={styles.main}>
-        <div className={styles.bands}>
+      <div className={styles.main} data-layout={layout} data-frame={UI_FEATURES.viewerWideFrame ? 'wide' : 'square'}>
+        <div className={styles.bands} hidden={layout !== 'spherex'}>
           {SHOW_TARGETS_TAB ? (
             <>
               <div className={styles.sideTabs} role="tablist" aria-label="Side panel">
@@ -192,23 +213,6 @@ function ObservationWorkspace({ query, targetSlug = null }: ObservationWorkspace
         {/* Both views stay mounted so switching modes does not recreate the viewer or chart instances. */}
         <div className={styles.stage}>
           <section className={styles.view} hidden={viewMode !== 'image'} aria-label="Sky image">
-            <div className={styles.sourceToggle} role="group" aria-label="Image source">
-              <button
-                type="button"
-                aria-pressed={imageSource === 'spherex'}
-                onClick={() => changeImageSource('spherex')}
-              >
-                SPHEREx
-              </button>
-              <button
-                type="button"
-                aria-pressed={imageSource === 'reference'}
-                onClick={() => changeImageSource('reference')}
-              >
-                Reference sky (DSS2)
-              </button>
-              <SavedImages onOpen={openSavedImage} />
-            </div>
             <div className={styles.sourceView} hidden={imageSource !== 'spherex'}>
               <SpherexFrameView
                 frame={timeline.activeFrame}
@@ -216,24 +220,37 @@ function ObservationWorkspace({ query, targetSlug = null }: ObservationWorkspace
                 status={source.status ?? 'loading'}
                 error={source.error}
                 progress={source.progress}
+                onRetry={() => setImageAttempt((value) => value + 1)}
+                fit={UI_FEATURES.viewerWideFrame ? 'cover' : 'contain'}
               />
             </div>
             {referenceRequested && (
               <div className={styles.sourceView} hidden={imageSource !== 'reference'}>
-                <AladinViewer target={query} observation={timeline.activeFrame} isDemoObservation={false} />
+                <AladinViewer target={query} observation={null} isDemoObservation={false} />
               </div>
             )}
           </section>
           <section className={styles.view} hidden={viewMode !== 'chart'} aria-label="Chart">
             {UI_FEATURES.spectrumGallery ? (
-              <SpectrumGallery data={spectrumGallery} loadingMessage={spectrumLoading} errorMessage={spectrumError} />
+              <SpectrumGallery
+                data={spectrumGallery}
+                loadingMessage={spectrumLoading}
+                errorMessage={spectrumError}
+                progress={spectrumFromTarget ? undefined : spectrum.progress}
+                onRetry={() => setSpectrumAttempt((value) => value + 1)}
+              />
             ) : (
               <SpectralChart datasets={chartDatasets} loadingMessage={spectrumLoading} errorMessage={spectrumError} />
             )}
           </section>
         </div>
 
-        <ViewModeToggle className={styles.mode} value={viewMode} onChange={changeViewMode} />
+        {/* Right rail: view mode, then (for images) the image source and saved images. */}
+        <div className={styles.mode}>
+          <ViewModeToggle value={viewMode} onChange={changeViewMode} />
+          {viewMode === 'image' && <ImageSourceToggle value={imageSource} onChange={changeImageSource} />}
+          {viewMode === 'image' && <SavedImages onOpen={openSavedImage} variant="rail" />}
+        </div>
 
         <TimelinePlayer
           className={styles.timeline}
@@ -251,6 +268,21 @@ function ObservationWorkspace({ query, targetSlug = null }: ObservationWorkspace
           playbackRate={timeline.playbackRate}
           onPlaybackRate={timeline.setPlaybackRate}
         />
+        <div className={styles.timeline} hidden={layout !== 'spherex'}>
+          <TimelinePlayer
+            frames={timeline.frames}
+            activeIndex={timeline.activeIndex}
+            isPlaying={timeline.isPlaying}
+            canPlay={timeline.canPlay}
+            canGoNewer={timeline.canGoNewer}
+            canGoOlder={timeline.canGoOlder}
+            isDemo={false}
+            onSelect={timeline.goTo}
+            onNewer={timeline.goToNewer}
+            onOlder={timeline.goToOlder}
+            onTogglePlay={timeline.togglePlay}
+          />
+        </div>
       </div>
 
       <ObservationMetadata

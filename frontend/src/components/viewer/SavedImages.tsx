@@ -6,10 +6,12 @@ import styles from './SavedImages.module.css';
 
 interface SavedImagesProps {
   onOpen: (image: SavedImage) => void;
+  /** "viewer": light button over the dark sky; "rail": surface button in the side rail. */
+  variant?: 'viewer' | 'rail';
 }
 
 /** Previously rendered coordinates. Reopening one reuses the backend's cached frames. */
-function SavedImages({ onOpen }: SavedImagesProps) {
+function SavedImages({ onOpen, variant = 'viewer' }: SavedImagesProps) {
   const panelId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -19,12 +21,12 @@ function SavedImages({ onOpen }: SavedImagesProps) {
   useEffect(() => {
     if (!open || !triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
-    setPosition({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
+    setPosition({ top: rect.bottom + 8, right: Math.max(8, window.innerWidth - rect.right) });
     setImages(readImageHistory());
   }, [open]);
 
   return (
-    <div className={styles.wrap}>
+    <div className={variant === 'rail' ? `${styles.wrap} ${styles.rail}` : styles.wrap}>
       <button
         ref={triggerRef}
         type="button"

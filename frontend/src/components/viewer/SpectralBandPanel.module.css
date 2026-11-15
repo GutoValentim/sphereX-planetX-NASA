@@ -78,3 +78,23 @@
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
+
+/* Bands still downloading in a live job (cannot be toggled yet). */
+.option[data-pending] {
+  cursor: progress;
+  color: var(--color-text-muted);
+}
+
+.option[data-pending]:hover {
+  background-color: transparent;
+}
+
+.progress {
+  flex-shrink: 0;
+  font-size: var(--font-size-label);
+  color: var(--color-text-secondary);
+}
+
+.label {
+  white-space: nowrap;
+}
