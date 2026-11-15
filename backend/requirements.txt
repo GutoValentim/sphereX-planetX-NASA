@@ -1,1 +1,7 @@
-# Adicionar dependências durante a implementação do backend.
+# Dependências diretas usadas pelo núcleo científico nesta primeira etapa.
+astropy>=7.1,<8
+astroquery>=0.4.11,<0.5
+numpy>=2.0,<3
+Pillow>=12,<13
+pyvo>=1.7,<2
+requests>=2.32,<3
