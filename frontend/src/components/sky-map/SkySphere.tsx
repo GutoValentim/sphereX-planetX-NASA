@@ -14,12 +14,27 @@ import ExploreModeSwitch from '../layout/ExploreModeSwitch';
 import SkyDust from './SkyDust';
 import SkyTargetList from './SkyTargetList';
 import SkyTargetMarkers, { type TargetOpenRequest } from './SkyTargetMarkers';
-import { SkySphereRenderer, type SkyFrame, type SkySelection } from './skySphereRenderer';
+import {
+  easeOutCubic,
+  galacticView,
+  HOME_VIEW,
+  SkySphereRenderer,
+  type SkyFrame,
+  type SkySelection,
+} from './skySphereRenderer';
 import styles from './SkySphere.module.css';
 
 /** Where a target lands after "fly to": a little above and left of the center. */
 const FLY_TO_OFFSET = { x: -0.12, y: -0.1 };
 const FLY_TO_FOV_DEG = 30;
+
+/** Opening move: start zoomed in, then sweep to the home view (UI_FEATURES.skyIntroAnimation). */
+// Starts over the region where the first targets were mapped, then sweeps to the home view.
+const INTRO_START = galacticView(201.58, -38.23, 85);
+const INTRO_END = HOME_VIEW;
+// A short beat after the sky is drawn, so the move reads as an invitation to drag.
+const INTRO_DELAY_MS = 300;
+const INTRO_DURATION_MS = 3200;
 
 /** Listed in toolbar order; the first one is shown by default. */
 const SKY_MAPS = {
@@ -144,17 +159,21 @@ function SkySphere({ onOpenViewer, isOpeningViewer = false, targets = [], onOpen
 
     let renderer: SkySphereRenderer;
     try {
-      renderer = new SkySphereRenderer(canvas, {
-        onSelect: setSelection,
-        onReady: () => setStatus('ready'),
-        onError: () => setStatus('error'),
-        onFrame: (frame) => {
-          const mark = markerRef.current;
-          if (!mark) return;
-          paintFrame(frame, mark, boxRef.current, centerRef.current, fovRef.current, controlsRef.current);
-          frameListeners.current.forEach((listener) => listener(frame));
+      renderer = new SkySphereRenderer(
+        canvas,
+        {
+          onSelect: setSelection,
+          onReady: () => setStatus('ready'),
+          onError: () => setStatus('error'),
+          onFrame: (frame) => {
+            const mark = markerRef.current;
+            if (!mark) return;
+            paintFrame(frame, mark, boxRef.current, centerRef.current, fovRef.current, controlsRef.current);
+            frameListeners.current.forEach((listener) => listener(frame));
+          },
         },
-      });
+        UI_FEATURES.skyIntroAnimation ? INTRO_START : undefined,
+      );
     } catch (error) {
       console.error('[SkySphere] WebGL unavailable', error);
       setStatus('unsupported');
@@ -177,6 +196,16 @@ function SkySphere({ onOpenViewer, isOpeningViewer = false, targets = [], onOpen
   useLayoutEffect(() => {
     if (status === 'ready') rendererRef.current?.renderNow();
   }, [status, selection]);
+
+  // Opening move: once the map is drawn, wait, then sweep across the sky — unless the user already moved it.
+  useEffect(() => {
+    if (!UI_FEATURES.skyIntroAnimation || status !== 'ready') return undefined;
+    const timer = window.setTimeout(() => {
+      const renderer = rendererRef.current;
+      if (renderer && !renderer.hasInteracted) renderer.animateTo(INTRO_END, INTRO_DURATION_MS, undefined, easeOutCubic);
+    }, INTRO_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [status, attempt]);
 
   const bandLabel = SPECTRAL_BANDS.find((band) => band.id === DEFAULT_SPECTRAL_BAND)?.label ?? DEFAULT_SPECTRAL_BAND;
   const setMarker = useCallback((node: HTMLDivElement | null) => {
