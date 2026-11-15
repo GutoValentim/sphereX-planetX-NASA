@@ -1,6 +1,7 @@
 import { lazy, Suspense, useState } from 'react';
 import { ChartIcon } from '../common/icons';
 import fieldStyles from '../common/Field.module.css';
+import ErrorState from '../common/ErrorState';
 import LoadingState from '../common/LoadingState';
 import VisualizationPlaceholder from './VisualizationPlaceholder';
 import type { ChartDataset } from '../../types/chart';
@@ -11,10 +12,13 @@ const PlotlyChart = lazy(() => import('../charts/PlotlyChart'));
 interface SpectralChartProps {
   /** Selectable charts for the current observation; empty until the backend provides them. */
   datasets: readonly ChartDataset[];
+  /** Shown instead of the placeholder while the data is being produced. */
+  loadingMessage?: string | null;
+  errorMessage?: string | null;
 }
 
 /** Lets the user pick which dataset to plot. Plotly is only downloaded once there is data to draw. */
-function SpectralChart({ datasets }: SpectralChartProps) {
+function SpectralChart({ datasets, loadingMessage, errorMessage }: SpectralChartProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = datasets.find((dataset) => dataset.id === selectedId) ?? datasets[0] ?? null;
 
@@ -47,6 +51,10 @@ function SpectralChart({ datasets }: SpectralChartProps) {
           <Suspense fallback={<LoadingState message="Loading chart…" />}>
             <PlotlyChart traces={selected.traces} layout={selected.layout} ariaLabel={selected.label} />
           </Suspense>
+        ) : errorMessage ? (
+          <ErrorState title="Spectrum unavailable" message={errorMessage} />
+        ) : loadingMessage ? (
+          <LoadingState message={loadingMessage} />
         ) : (
           <VisualizationPlaceholder
             icon={<ChartIcon />}

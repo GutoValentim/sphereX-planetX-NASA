@@ -139,3 +139,40 @@ test('spectrum routes validate identifiers before calling Python', async () => {
   assert.equal((await fetch(`${url}/api/espectros/arquivos/0123456789abcdef/spectrum/x.fits`)).status, 404);
   assert.equal((await fetch(`${url}/api/espectros/arquivos/abc/spectrum/x.svg`)).status, 404);
 });
+test('image consultation forwards sequence options and exposes frames through /api', async () => {
+  const upstream = await listen(createServer(async (req, res) => {
+    if (req.url === '/receber-dados') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk);
+      assert.deepEqual(JSON.parse(Buffer.concat(chunks).toString()), {
+        RA: 10, DEC: -5, Data: '2026-11-14', bandas: ['D1', 'D3'], modo: 'balanceada', cor: 'mono', referencia: 'D1',
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ observations: [], sequencia: { status_url: '/sequencias/aaaaaaaaaaaaaaaa' } }));
+      return;
+    }
+    if (req.url === '/sequencias/aaaaaaaaaaaaaaaa') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ frames: [{ layers: [{ image_url: '/sequencias/arquivos/0123456789abcdef/frames/limpa-color/001_a.webp?v=8' }] }] }));
+      return;
+    }
+    if (req.url === '/sequencias/arquivos/0123456789abcdef/frames/limpa-color/001_a.webp') {
+      res.writeHead(200, { 'Content-Type': 'image/webp', 'Cache-Control': 'public, max-age=86400' });
+      res.end(Buffer.from('RIFF0000WEBP'));
+      return;
+    }
+    res.writeHead(404).end();
+  }));
+  const url = await listen(createServer(createApp({ pythonApiUrl: upstream })));
+  const first = await fetch(`${url}/api/consulta?RA=10&DEC=-5&Data=2026-11-14&bandas=D1,D3&modo=balanceada&cor=mono&referencia=D1`);
+  const body = await first.json();
+  assert.equal(body.sequencia.status_url, '/api/sequencias/aaaaaaaaaaaaaaaa');
+  const sequence = await (await fetch(`${url}${body.sequencia.status_url}`)).json();
+  const imageUrl = sequence.frames[0].layers[0].image_url;
+  assert.equal(imageUrl, '/api/sequencias/arquivos/0123456789abcdef/frames/limpa-color/001_a.webp?v=8');
+  const image = await fetch(`${url}${imageUrl}`);
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get('content-type'), 'image/webp');
+  assert.equal((await fetch(`${url}/api/sequencias/arquivos/0123456789abcdef/fits/x/a.fits`)).status, 404);
+  assert.equal((await fetch(`${url}/api/consulta?RA=10&DEC=-5&Data=2026-11-14&modo=a%20b`)).status, 400);
+});

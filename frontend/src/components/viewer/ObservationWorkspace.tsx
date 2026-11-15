@@ -3,20 +3,24 @@ import AladinViewer from './AladinViewer';
 import ObservationMetadata from './ObservationMetadata';
 import SpectralBandPanel from './SpectralBandPanel';
 import SpectralChart from './SpectralChart';
+import SpherexFrameView from './SpherexFrameView';
 import TimelinePlayer from './TimelinePlayer';
 import ViewModeToggle from './ViewModeToggle';
-import { SPECTRAL_BANDS } from '../../constants/spectralBands';
+import { DEFAULT_SPECTRAL_BAND, SPECTRAL_BANDS } from '../../constants/spectralBands';
 import { useBandSelection } from '../../hooks/useBandSelection';
 import { useObservationFrames } from '../../hooks/useObservationFrames';
+import { useSpectrum } from '../../hooks/useSpectrum';
 import { useTimeline } from '../../hooks/useTimeline';
-import type { ChartDataset } from '../../types/chart';
 import type { ObservationQuery } from '../../types/observation';
 import type { ViewMode } from '../../types/viewer';
+import { toSpectrumDatasets } from '../../utils/apiMapping';
 import styles from './ObservationWorkspace.module.css';
 
-const AVAILABLE_BAND_IDS = SPECTRAL_BANDS.map((band) => band.id);
-/** Chart series will come from the backend; there is no endpoint for them yet. */
-const NO_CHART_DATASETS: readonly ChartDataset[] = [];
+/** The viewer shows individual SPHEREx detectors; "P (all bands)" is a form shortcut, not a layer. */
+const DISPLAY_BANDS = SPECTRAL_BANDS.filter((band) => band.id !== DEFAULT_SPECTRAL_BAND);
+const DISPLAY_BAND_IDS = DISPLAY_BANDS.map((band) => band.id);
+
+type ImageSource = 'spherex' | 'reference';
 
 interface ObservationWorkspaceProps {
   query: ObservationQuery;
@@ -24,22 +28,49 @@ interface ObservationWorkspaceProps {
 
 function ObservationWorkspace({ query }: ObservationWorkspaceProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('image');
-  const { selectedBandIds, toggleBand, selectAll, clearAll } = useBandSelection(AVAILABLE_BAND_IDS);
-  const { frames, isDemo } = useObservationFrames();
-  const timeline = useTimeline(frames, { preferredDate: query.observationDate });
+  const [imageSource, setImageSource] = useState<ImageSource>('spherex');
+  // Heavy views start on first use and then stay mounted, so switching back is instant.
+  const [referenceRequested, setReferenceRequested] = useState(false);
+  const [chartRequested, setChartRequested] = useState(false);
+
+  const { selectedBandIds, toggleBand, selectAll, clearAll } = useBandSelection(DISPLAY_BAND_IDS);
+  const source = useObservationFrames(query);
+  const timeline = useTimeline(source.frames, { preferredDate: query.observationDate });
+  const spectrum = useSpectrum(query, chartRequested);
 
   const selectedBands = useMemo(
-    () => SPECTRAL_BANDS.filter((band) => selectedBandIds.includes(band.id)),
+    () => DISPLAY_BANDS.filter((band) => selectedBandIds.includes(band.id)),
     [selectedBandIds],
   );
   const requestedBandLabel = SPECTRAL_BANDS.find((band) => band.id === query.band)?.label ?? query.band;
+  const chartDatasets = useMemo(
+    () => toSpectrumDatasets(spectrum.snapshot?.result?.bands ?? [], selectedBandIds),
+    [spectrum.snapshot, selectedBandIds],
+  );
+
+  const changeViewMode = (mode: ViewMode) => {
+    if (mode === 'chart') setChartRequested(true);
+    setViewMode(mode);
+  };
+  const changeImageSource = (next: ImageSource) => {
+    if (next === 'reference') setReferenceRequested(true);
+    setImageSource(next);
+  };
+
+  const spectrumProgress = spectrum.progress.total
+    ? ` (${spectrum.progress.done}/${spectrum.progress.total} observations)`
+    : '';
+  const spectrumLoading =
+    spectrum.status === 'loading'
+      ? `Measuring the target in every SPHEREx observation${spectrumProgress}… a new coordinate takes 1–2 minutes.`
+      : null;
 
   return (
     <div className={styles.workspace}>
       <div className={styles.main}>
         <SpectralBandPanel
           className={styles.bands}
-          bands={SPECTRAL_BANDS}
+          bands={DISPLAY_BANDS}
           selectedBandIds={selectedBandIds}
           onToggle={toggleBand}
           onSelectAll={selectAll}
@@ -49,14 +80,47 @@ function ObservationWorkspace({ query }: ObservationWorkspaceProps) {
         {/* Both views stay mounted so switching modes does not recreate the viewer or chart instances. */}
         <div className={styles.stage}>
           <section className={styles.view} hidden={viewMode !== 'image'} aria-label="Sky image">
-            <AladinViewer target={query} observation={timeline.activeFrame} isDemoObservation={isDemo} />
+            <div className={styles.sourceToggle} role="group" aria-label="Image source">
+              <button
+                type="button"
+                aria-pressed={imageSource === 'spherex'}
+                onClick={() => changeImageSource('spherex')}
+              >
+                SPHEREx
+              </button>
+              <button
+                type="button"
+                aria-pressed={imageSource === 'reference'}
+                onClick={() => changeImageSource('reference')}
+              >
+                Reference sky (DSS2)
+              </button>
+            </div>
+            <div className={styles.sourceView} hidden={imageSource !== 'spherex'}>
+              <SpherexFrameView
+                frame={timeline.activeFrame}
+                selectedBandIds={selectedBandIds}
+                status={source.status ?? 'loading'}
+                error={source.error}
+                progress={source.progress}
+              />
+            </div>
+            {referenceRequested && (
+              <div className={styles.sourceView} hidden={imageSource !== 'reference'}>
+                <AladinViewer target={query} observation={timeline.activeFrame} isDemoObservation={false} />
+              </div>
+            )}
           </section>
           <section className={styles.view} hidden={viewMode !== 'chart'} aria-label="Chart">
-            <SpectralChart datasets={NO_CHART_DATASETS} />
+            <SpectralChart
+              datasets={chartDatasets}
+              loadingMessage={spectrumLoading}
+              errorMessage={spectrum.status === 'error' ? spectrum.error : null}
+            />
           </section>
         </div>
 
-        <ViewModeToggle className={styles.mode} value={viewMode} onChange={setViewMode} />
+        <ViewModeToggle className={styles.mode} value={viewMode} onChange={changeViewMode} />
 
         <TimelinePlayer
           className={styles.timeline}
@@ -66,7 +130,7 @@ function ObservationWorkspace({ query }: ObservationWorkspaceProps) {
           canPlay={timeline.canPlay}
           canGoNewer={timeline.canGoNewer}
           canGoOlder={timeline.canGoOlder}
-          isDemo={isDemo}
+          isDemo={false}
           onSelect={timeline.goTo}
           onNewer={timeline.goToNewer}
           onOlder={timeline.goToOlder}
@@ -79,7 +143,7 @@ function ObservationWorkspace({ query }: ObservationWorkspaceProps) {
         requestedBandLabel={requestedBandLabel}
         selectedBands={selectedBands}
         activeObservation={timeline.activeFrame}
-        isDemoObservation={isDemo}
+        isDemoObservation={false}
       />
     </div>
   );

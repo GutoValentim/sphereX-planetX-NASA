@@ -14,6 +14,7 @@ import logging
 import os
 from pathlib import Path
 import re
+from threading import Lock
 import time
 from typing import Any, Callable, Literal, Protocol, TypeVar
 
@@ -22,10 +23,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from app.services.frame_generator import RENDER_PROFILES
+from app.services.sequence_jobs import SequenceJobManager
 from app.services.spectral_color import SPHEREX_BANDS, get_spherex_band
 from app.services.spectrum_jobs import SpectrumJobManager
 from app.services.spectrum_service import SpherexSpectrumService
 from app.services.temporal_sequence_service import (
+    FRAME_CACHE_VERSION,
     SequenceLimitExceeded,
     SpherexTemporalSequenceService,
     TemporalDataset,
@@ -38,9 +42,14 @@ T = TypeVar("T")
 DEFAULT_CACHE_DIR = Path(__file__).resolve().parents[1] / "cache" / "temporal"
 DEFAULT_RELEASE_ENV = Path("/app/.release.env")
 SPECTRUM_FILES_PREFIX = "/espectros/arquivos/"
+SEQUENCE_FILES_PREFIX = "/sequencias/arquivos/"
 _JOB_ID = re.compile(r"[0-9a-f]{16}")
 _SPECTRUM_FILE = re.compile(r"[0-9a-f]{16}/spectrum/[A-Za-z0-9._-]+\.svg")
+_FRAME_FILE = re.compile(r"[0-9a-f]{16}/frames/[a-z]+-(?:color|mono)/[A-Za-z0-9._-]+\.webp")
 THEMES = {"escuro": "dark", "claro": "light"}
+MODES = {"rapida": "fast", "balanceada": "balanced", "completa": "full"}
+COLORS = {"falsa": "color", "mono": "mono"}
+DEFAULT_ANCHOR = "SPHEREx-D3"
 
 
 class DatasetDiscovery(Protocol):
@@ -67,6 +76,14 @@ class Consulta(BaseModel):
         description="Só para espectro: ex. ['SPHEREx-D1', 'D3']. Padrão: D1–D6.",
     )
     tema: Literal["escuro", "claro"] = Field(default="escuro", description="Tema dos gráficos.")
+    modo: Literal["rapida", "balanceada", "completa"] = Field(
+        default="rapida", description="Imagem: até 4, 12 ou todas as épocas."
+    )
+    perfil: str = Field(default="limpa", description="Imagem: perfil de renderização.")
+    cor: Literal["falsa", "mono"] = Field(default="falsa", description="Imagem: falsa cor ou monocromático.")
+    referencia: str | None = Field(
+        default=None, description="Imagem: banda que define as épocas (padrão D3)."
+    )
 
 
 def release_version() -> str:
@@ -126,6 +143,7 @@ def create_app(
     retry_attempts: int = 3,
     retry_delay_seconds: float = 1.0,
     spectrum_jobs: SpectrumJobManager | None = None,
+    sequence_jobs: SequenceJobManager | None = None,
 ) -> FastAPI:
     service = service or SpherexTemporalSequenceService(download_workers=4)
     cache_dir = cache_dir or Path(os.environ.get("SPHEREX_CACHE_DIR", DEFAULT_CACHE_DIR))
@@ -138,6 +156,23 @@ def create_app(
     spectrum_jobs = spectrum_jobs or SpectrumJobManager(
         SpherexSpectrumService(download_workers=6), cache_dir, spectrum_file_url
     )
+
+    def frame_file_url(path: Path) -> str:
+        relative = path.resolve().relative_to(cache_dir.resolve())
+        return f"{SEQUENCE_FILES_PREFIX}{relative.as_posix()}?v={FRAME_CACHE_VERSION}"
+
+    sequence_services: dict[str, SpherexTemporalSequenceService] = {}
+    sequence_services_lock = Lock()
+
+    def sequence_service(bandpass: str) -> SpherexTemporalSequenceService:
+        with sequence_services_lock:
+            if bandpass not in sequence_services:
+                sequence_services[bandpass] = SpherexTemporalSequenceService(
+                    bandpass=bandpass, download_workers=4, lite_downloads=True
+                )
+            return sequence_services[bandpass]
+
+    sequence_jobs = sequence_jobs or SequenceJobManager(sequence_service, cache_dir, frame_file_url)
 
     app = FastAPI(title="SPHEREx Python", version=version)
 
@@ -179,7 +214,29 @@ def create_app(
 
         data = dataset.to_dict()
         data.pop("dataset_path", None)  # caminho interno do servidor
-        return {"consulta": consulta.model_dump(include={"RA", "DEC", "Data"}), **data}
+        body = {"consulta": consulta.model_dump(include={"RA", "DEC", "Data"}), **data}
+        # Campo adicional: a sequência de imagens alinhadas, gerada em segundo plano.
+        try:
+            body["sequencia"] = start_sequence(consulta)
+        except ValueError as exc:
+            return _error(400, str(exc))
+        return body
+
+    def start_sequence(consulta: Consulta) -> dict[str, Any]:
+        if consulta.perfil not in RENDER_PROFILES:
+            raise ValueError(f"perfil inválido. Use um de: {', '.join(RENDER_PROFILES)}.")
+        bands = normalize_bands(consulta.bandas)
+        anchor = normalize_bands([consulta.referencia])[0] if consulta.referencia else DEFAULT_ANCHOR
+        job = sequence_jobs.start(
+            ra_deg=consulta.RA,
+            dec_deg=consulta.DEC,
+            bandpasses=bands,
+            anchor_bandpass=anchor,
+            mode=MODES[consulta.modo],
+            render_profile=consulta.perfil,
+            color_mode=COLORS[consulta.cor],
+        )
+        return {"status_url": f"/sequencias/{job['job_id']}", "job": job}
 
     def start_spectrum(consulta: Consulta) -> JSONResponse:
         try:
@@ -194,6 +251,31 @@ def create_app(
             "job": job,
         }
         return JSONResponse(status_code=202 if job["status"] == "running" else 200, content=body)
+
+    @app.get("/sequencias/{job_id}")
+    def sequence_status(job_id: str) -> Any:
+        """Épocas e camadas por banda; ``image_url`` aparece quando o frame fica pronto."""
+
+        if not _JOB_ID.fullmatch(job_id):
+            return _error(400, "Identificador de sequência inválido.")
+        try:
+            return sequence_jobs.snapshot(job_id)
+        except FileNotFoundError as exc:
+            return _error(404, str(exc))
+
+    @app.get(SEQUENCE_FILES_PREFIX + "{relative:path}")
+    def sequence_file(relative: str) -> Any:
+        if not _FRAME_FILE.fullmatch(relative):
+            return _error(404, "Imagem não encontrada.")
+        root = cache_dir.resolve()
+        target = (root / relative).resolve()
+        if not target.is_relative_to(root) or not target.is_file():
+            return _error(404, "Imagem não encontrada.")
+        return FileResponse(
+            target,
+            media_type="image/webp",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
 
     @app.get("/espectros/{job_id}")
     def spectrum_status(job_id: str) -> Any:

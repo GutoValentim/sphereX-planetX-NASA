@@ -37,7 +37,7 @@ export function createApp({
   // caminhos /espectros/... para o prefixo público /api/espectros/...
   const publicPaths = (value: unknown): unknown => {
     if (typeof value === 'string') {
-      return value.startsWith('/espectros/') ? `/api${value}` : value;
+      return value.startsWith('/espectros/') || value.startsWith('/sequencias/') ? `/api${value}` : value;
     }
     if (Array.isArray(value)) return value.map(publicPaths);
     if (value && typeof value === 'object') {
@@ -70,13 +70,25 @@ export function createApp({
       res.status(502).json({ erro: 'Resposta inválida do FastAPI' });
     }
   };
+  const relayFile = async (path: string, contentType: string, res: express.Response) => {
+    const response = await callPython(path, res);
+    if (!response) return;
+    if (!response.ok) {
+      res.status(response.status).json({ erro: 'Arquivo não encontrado.' });
+      return;
+    }
+    res.status(200);
+    res.set('Content-Type', contentType);
+    res.set('Cache-Control', response.headers.get('cache-control') ?? 'public, max-age=86400');
+    res.send(Buffer.from(await response.arrayBuffer()));
+  };
   const forwardConsulta = (payload: unknown, res: express.Response) => relayJson('/receber-dados', res, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
   app.get('/api/consulta', async (req, res) => {
-    const { RA, DEC, Data, elemento, bandas, tema } = req.query;
+    const { RA, DEC, Data, elemento, bandas, tema, modo, perfil, cor, referencia } = req.query;
     const ra = typeof RA === 'string' && RA.trim() ? Number(RA) : Number.NaN;
     const dec = typeof DEC === 'string' && DEC.trim() ? Number(DEC) : Number.NaN;
     if (!Number.isFinite(ra) || !Number.isFinite(dec) ||
@@ -96,14 +108,40 @@ export function createApp({
       res.status(400).json({ erro: 'bandas deve ser uma lista separada por vírgulas, ex.: D1,D3.' });
       return;
     }
+    const options = { modo, perfil, cor, referencia };
+    for (const [name, value] of Object.entries(options)) {
+      if (value !== undefined && (typeof value !== 'string' || !/^[A-Za-z0-9-]{1,20}$/.test(value))) {
+        res.status(400).json({ erro: `${name} inválido.` });
+        return;
+      }
+    }
     const payload: Record<string, unknown> = { RA: ra, DEC: dec, Data };
     if (elemento) payload.elemento = elemento;
     if (tema) payload.tema = tema;
+    for (const [name, value] of Object.entries(options)) {
+      if (value) payload[name] = value;
+    }
     if (bandas) payload.bandas = bandas.split(',').map((band) => band.trim()).filter(Boolean);
     await forwardConsulta(payload, res);
   });
   app.post('/api/consulta', async (req, res) => {
     await forwardConsulta(req.body, res);
+  });
+  app.get('/api/sequencias/:jobId', async (req, res) => {
+    if (!/^[0-9a-f]{16}$/.test(req.params.jobId)) {
+      res.status(400).json({ erro: 'Identificador de sequência inválido.' });
+      return;
+    }
+    await relayJson(`/sequencias/${req.params.jobId}`, res);
+  });
+  app.get('/api/sequencias/arquivos/:dataset/frames/:variant/:file', async (req, res) => {
+    const { dataset, variant, file } = req.params;
+    if (!/^[0-9a-f]{16}$/.test(dataset) || !/^[a-z]+-(?:color|mono)$/.test(variant) ||
+        !/^[A-Za-z0-9._-]+\.webp$/.test(file)) {
+      res.status(404).json({ erro: 'Imagem não encontrada.' });
+      return;
+    }
+    await relayFile(`/sequencias/arquivos/${dataset}/frames/${variant}/${file}`, 'image/webp', res);
   });
   app.get('/api/espectros/:jobId', async (req, res) => {
     if (!/^[0-9a-f]{16}$/.test(req.params.jobId)) {
@@ -118,16 +156,7 @@ export function createApp({
       res.status(404).json({ erro: 'Gráfico não encontrado.' });
       return;
     }
-    const response = await callPython(`/espectros/arquivos/${dataset}/spectrum/${file}`, res);
-    if (!response) return;
-    if (!response.ok) {
-      res.status(response.status).json({ erro: 'Gráfico não encontrado.' });
-      return;
-    }
-    res.status(200);
-    res.set('Content-Type', 'image/svg+xml');
-    res.set('Cache-Control', response.headers.get('cache-control') ?? 'public, max-age=31536000, immutable');
-    res.send(Buffer.from(await response.arrayBuffer()));
+    await relayFile(`/espectros/arquivos/${dataset}/spectrum/${file}`, 'image/svg+xml', res);
   });
   return app;
 }

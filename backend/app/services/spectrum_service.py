@@ -16,7 +16,6 @@ from hashlib import sha256
 import json
 from math import pi
 from pathlib import Path
-import re
 from threading import BoundedSemaphore, Lock
 import time
 from typing import Any, Callable, Sequence
@@ -30,6 +29,7 @@ import numpy as np
 from scipy import ndimage
 
 from app.schemas.observations import ObservationRecord
+from app.services.cutout_cache import CalibrationStore, obtain_cutout
 from app.services.image_aligner import source_wavelength_map
 from app.services.spectral_color import SPHEREX_BANDS, get_spherex_band
 from app.services.spectrum_chart import ChartSeries, render_spectrum_svg
@@ -55,8 +55,7 @@ SPECTRUM_MAX_OBSERVATIONS = 300
 MJY_PER_SR_TO_MJY = 1e9  # 1 MJy = 10^9 mJy
 
 ProgressCallback = Callable[[int, int], None]
-_SPECTRAL_WCS_ID = re.compile(r"\[CALIB\]\s+spectral_wcs\s+(\S+)")
-_SAFE_ID = re.compile(r"[^A-Za-z0-9._-]+")
+
 
 
 @dataclass(frozen=True)
@@ -267,7 +266,6 @@ class SpherexSpectrumService:
         self._network = BoundedSemaphore(download_workers)
         self._services: dict[str, SpherexTemporalSequenceService] = {}
         self._lock = Lock()
-        self._calibration_locks: dict[tuple[str, str], Lock] = {}
 
     def _service(self, bandpass: str) -> SpherexTemporalSequenceService:
         with self._lock:
@@ -381,90 +379,23 @@ class SpherexSpectrumService:
         observation: ObservationRecord,
         root: Path,
     ) -> Path:
-        """Recorte só com IMAGE/FLAGS/VARIANCE + tabela WCS-WAVE em cache.
+        """Recorte só até VARIANCE (~30 KB) + tabela WCS-WAVE em cache."""
 
-        A tabela de comprimento de onda é uma calibração por detector
-        (identificada por ``[CALIB] spectral_wcs <uuid>`` no cabeçalho). Na
-        primeira vez que uma calibração aparece, baixa o recorte completo e
-        guarda a tabela; nas demais, baixa só o início do arquivo (~30 KB em vez
-        de ~4 MB, quase todo ocupado pela tabela EPSF).
-        """
-
-        client = service.irsa_client
-        directory = Path(dataset.dataset_path).parent / "fits"
-        options = {
-            "cutout_center": (dataset.ra_deg, dataset.dec_deg),
-            "cutout_size_deg": dataset.cutout_fov_arcmin / 60,
-        }
-        if not hasattr(client, "download_hdus"):
-            return client.download(observation, directory, **options)
-
-        lite = client.download_hdus(observation, directory, stop_after="VARIANCE", **options)
-        with fits.open(lite) as hdus:
-            if "WCS-WAVE" in hdus:
-                return lite
-            header = hdus["IMAGE"].header
-            detector = str(header.get("DETECTOR", ""))
-            calibration = _spectral_wcs_id(header)
-        if not detector or calibration is None:
-            return client.download(observation, directory, **options)
-
-        key = (detector, calibration)
-        with self._lock:
-            lock = self._calibration_locks.setdefault(key, Lock())
-        table_path = _calibration_path(root, detector, calibration)
-        with lock:
-            if not table_path.exists():
-                full = client.download(observation, directory, **options)
-                self.learn_calibration(full, root)
-                return full
-
-        with fits.open(lite) as hdus, fits.open(table_path) as table:
-            combined = fits.HDUList([hdu.copy() for hdu in hdus] + [table["WCS-WAVE"].copy()])
-            temporary = lite.with_suffix(".tmp")
-            combined.writeto(temporary, overwrite=True)
-        temporary.replace(lite)
-        return lite
+        return obtain_cutout(
+            service.irsa_client,
+            observation,
+            Path(dataset.dataset_path).parent / "fits",
+            cutout_center=(dataset.ra_deg, dataset.dec_deg),
+            cutout_size_deg=dataset.cutout_fov_arcmin / 60,
+            stop_after="VARIANCE",
+            store=CalibrationStore(root),
+        )
 
     def learn_calibration(self, fits_path: Path, root: Path) -> bool:
-        """Guarda a tabela WCS-WAVE de um recorte completo; True se for nova."""
-
-        with fits.open(fits_path) as hdus:
-            if "IMAGE" not in hdus or "WCS-WAVE" not in hdus:
-                return False
-            header = hdus["IMAGE"].header
-            detector = str(header.get("DETECTOR", ""))
-            calibration = _spectral_wcs_id(header)
-            if not detector or calibration is None:
-                return False
-            path = _calibration_path(root, detector, calibration)
-            if path.exists():
-                return False
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = path.with_suffix(".tmp")
-            fits.HDUList([fits.PrimaryHDU(), hdus["WCS-WAVE"].copy()]).writeto(
-                temporary, overwrite=True
-            )
-            temporary.replace(path)
-            return True
+        return CalibrationStore(root).learn(fits_path)
 
     def seed_calibrations(self, root: Path, *, limit: int = 400) -> int:
-        """Aprende calibrações a partir de recortes completos já em cache."""
-
-        learned = 0
-        detectors: set[str] = set()
-        for index, path in enumerate(sorted(root.glob("*/fits/*-cutout.fits"))):
-            if index >= limit or len(detectors) >= len(SPHEREX_BANDS):
-                break
-            try:
-                detector = str(fits.getval(path, "DETECTOR", extname="IMAGE"))
-                if detector in detectors:
-                    continue
-                learned += self.learn_calibration(path, root)
-                detectors.add(detector)
-            except (OSError, KeyError, ValueError):
-                continue
-        return learned
+        return CalibrationStore(root).seed(limit=limit)
 
     def spectrum(
         self,
@@ -532,20 +463,6 @@ class SpherexSpectrumService:
             {"version": SPECTRUM_VERSION, "ra_deg": ra_deg, "dec_deg": dec_deg, "bandpasses": names},
         )
         return SpectrumResult(ra_deg, dec_deg, bands, band_charts, str(combined), composite_id)
-
-
-def _calibration_path(root: Path, detector: str, calibration: str) -> Path:
-    return root / "calibration" / (
-        f"wcs-wave-d{_SAFE_ID.sub('_', detector)}-{_SAFE_ID.sub('_', calibration)}.fits"
-    )
-
-
-def _spectral_wcs_id(header: fits.Header) -> str | None:
-    for entry in header.get("HISTORY", []):
-        match = _SPECTRAL_WCS_ID.search(str(entry))
-        if match:
-            return match.group(1)
-    return None
 
 
 def _series(band: BandSpectrum) -> ChartSeries:
