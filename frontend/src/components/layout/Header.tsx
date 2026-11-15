@@ -21,7 +21,7 @@ function Header({ title, backTo }: HeaderProps) {
             </Link>
           )}
           <Link to={ROUTES.home} className={styles.brand}>
-            SPHEREx - Sky and Time Explorer
+            CosmoSPHERE - SPHEREx Cosmos Explorer
           </Link>
         </div>
 
