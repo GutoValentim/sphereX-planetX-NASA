@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom';
 import ParallaxWallpaper from './assets/wallpapers/ParallaxWallpaper';
 import LoadingState from './components/common/LoadingState';
 import PageContainer from './components/layout/PageContainer';
@@ -13,12 +13,20 @@ import ScrollToTop from './routes/ScrollToTop';
 const SeeTheSky = lazy(() => import('./pages/SeeTheSky'));
 const ExploreMap = lazy(() => import('./pages/ExploreMap'));
 
+/** Routes that keep the plain page color (--color-page) instead of the parallax wallpaper. */
+const SOLID_BACKGROUND_ROUTES: readonly string[] = [ROUTES.viewer];
+
+function SiteWallpaper() {
+  const { pathname } = useLocation();
+  return SOLID_BACKGROUND_ROUTES.includes(pathname) ? null : <ParallaxWallpaper />;
+}
+
 function App() {
   return (
     <BrowserRouter>
       <ScrollToTop />
       <div id="hero-backdrop" className="hero-backdrop" />
-      <ParallaxWallpaper />
+      <SiteWallpaper />
       <div className="parallax-content">
         <Suspense
           fallback={
