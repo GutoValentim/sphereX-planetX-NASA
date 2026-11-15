@@ -12,6 +12,7 @@ equipe.
 - `numpy`: normalização e transformação matricial da extensão `IMAGE`;
 - `Pillow`: codificação dos frames em PNG, WebP ou JPEG;
 - `requests`: download HTTPS dos arquivos e cutouts FITS.
+- `reproject`: reprojeção de cada FITS para uma grade WCS celeste comum.
 
 As demais bibliotecas científicas serão adicionadas quando houver uso direto no
 código.
@@ -24,12 +25,17 @@ código.
 - `inspect_fits`: lista HDUs, metadados e verifica se o alvo está dentro da imagem.
 - `generate_frame`: converte a extensão científica `IMAGE` em um frame 8-bit com
   normalização por percentis e stretch `asinh`.
+- `build_common_sky_grid`: cria uma grade TAN quadrada, norte-para-cima e com o
+  RA/Dec solicitado exatamente no pixel central;
+- `align_fits_image`: reprojeta a WCS/SIP de cada observação para a grade comum
+  e mede a fração efetivamente coberta;
 - `SpherexImageService.create_preview`: recebe RA, Dec e FOV, seleciona uma
   observação compatível, baixa o cutout e devolve a imagem com seus metadados.
 - `SpherexTemporalSequenceService.create_sequence`: recebe RA e Dec, consulta o
   SIA2 novamente, seleciona até 100 observações D3 que cobrem integralmente o FOV
-  fixo de 30 arcmin, baixa os cutouts em paralelo e gera uma sequência WebP com
-  manifesto JSON ordenado pelo horário de observação.
+  final de 30 arcmin, baixa cutouts-fonte de 45 arcmin em paralelo e gera uma
+  sequência WebP com manifesto JSON ordenado pelo horário de observação. A
+  margem externa preserva a janela menor durante rotações de até qualquer ângulo.
 - `SpherexTemporalSequenceService.discover_dataset`: consulta apenas metadados e
   reutiliza `dataset.json` para repetir coordenadas sem nova chamada à IRSA;
 - `SpherexTemporalSequenceService.select_indices`: oferece os modos rápido (até
@@ -39,11 +45,12 @@ código.
 - `SpherexTemporalSequenceService.clear_cache`: remove um dataset validado ou
   todos os artefatos regeneráveis da raiz de cache dedicada.
 
-O motor temporal ainda não reprojeta os frames. O manifesto retorna
-`aligned: false`, deixando explícito que cada imagem preserva sua grade WCS
-original. Os FITS ficam em cache por combinação de coordenadas, banda, coleções
-e período. O fluxo completo pode forçar uma nova consulta; o fluxo lazy prefere
-o catálogo cacheado até que a camada chamadora solicite refresh ou limpe o cache.
+O motor temporal reprojeta todos os frames para a mesma grade TAN e retorna
+`aligned: true`. A correção usa a WCS completa de cada FITS, incluindo a
+distorção SIP quando presente, em vez de supor um deslocamento uniforme em RA,
+Dec ou pixels. Os FITS ficam em cache por combinação de coordenadas, banda,
+coleções e período. O cache de previews possui versão própria; imagens antigas
+sem alinhamento são regeneradas automaticamente.
 
 O FITS continua sendo a fonte científica. Os frames são derivados para exibição.
 Na comparação entre épocas, todos os frames devem usar o mesmo intervalo

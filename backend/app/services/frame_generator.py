@@ -30,6 +30,10 @@ class GeneratedFrame:
     display_max: float
     stretch: str
     vertically_flipped: bool
+    aligned: bool = False
+    center_ra_deg: float | None = None
+    center_dec_deg: float | None = None
+    coverage_fraction: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -52,15 +56,7 @@ def generate_frame(
     informe os mesmos ``display_min`` e ``display_max`` em todos os frames.
     """
 
-    if not 0 <= lower_percentile < upper_percentile <= 100:
-        raise ValueError("Os percentis devem obedecer 0 <= inferior < superior <= 100.")
-    if (display_min is None) != (display_max is None):
-        raise ValueError("display_min e display_max devem ser informados juntos.")
-    if display_min is not None and display_max is not None and display_min >= display_max:
-        raise ValueError("display_min deve ser menor que display_max.")
-
     source = fits_path.expanduser().resolve(strict=True)
-    image_format = _format_from_path(output_path)
 
     with fits.open(source, memmap=True) as hdus:
         if source_hdu not in hdus:
@@ -68,6 +64,49 @@ def generate_frame(
         hdu = hdus[source_hdu]
         data = np.asarray(hdu.data, dtype=np.float32)
         source_unit = hdu.header.get("BUNIT")
+
+    return generate_frame_from_array(
+        data,
+        output_path,
+        source_hdu=source_hdu,
+        source_unit=source_unit,
+        lower_percentile=lower_percentile,
+        upper_percentile=upper_percentile,
+        display_min=display_min,
+        display_max=display_max,
+        vertically_flip=vertically_flip,
+    )
+
+
+def generate_frame_from_array(
+    data: np.ndarray,
+    output_path: Path,
+    *,
+    source_hdu: str = "IMAGE",
+    source_unit: str | None = None,
+    lower_percentile: float = 1.0,
+    upper_percentile: float = 99.0,
+    display_min: float | None = None,
+    display_max: float | None = None,
+    vertically_flip: bool = True,
+    aligned: bool = False,
+    center_ra_deg: float | None = None,
+    center_dec_deg: float | None = None,
+    coverage_fraction: float | None = None,
+) -> GeneratedFrame:
+    """Gera um frame web a partir de uma matriz científica bidimensional."""
+
+    if not 0 <= lower_percentile < upper_percentile <= 100:
+        raise ValueError("Os percentis devem obedecer 0 <= inferior < superior <= 100.")
+    if (display_min is None) != (display_max is None):
+        raise ValueError("display_min e display_max devem ser informados juntos.")
+    if display_min is not None and display_max is not None and display_min >= display_max:
+        raise ValueError("display_min deve ser menor que display_max.")
+    if aligned and (center_ra_deg is None or center_dec_deg is None):
+        raise ValueError("Frames alinhados devem informar o centro celeste.")
+
+    image_format = _format_from_path(output_path)
+    data = np.asarray(data, dtype=np.float32)
 
     if data.ndim != 2:
         raise ValueError(f"A extensão {source_hdu!r} deve ser bidimensional.")
@@ -112,6 +151,10 @@ def generate_frame(
         display_max=display_max,
         stretch="asinh",
         vertically_flipped=vertically_flip,
+        aligned=aligned,
+        center_ra_deg=center_ra_deg,
+        center_dec_deg=center_dec_deg,
+        coverage_fraction=coverage_fraction,
     )
 
 
