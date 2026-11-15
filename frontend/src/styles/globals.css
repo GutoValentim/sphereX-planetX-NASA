@@ -15,10 +15,11 @@ body {
   margin: 0;
   min-height: 100dvh;
   font-family: var(--font-body);
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-regular);
   line-height: var(--line-height-base);
-  color: var(--color-text);
-  background-color: var(--color-background);
+  color: var(--color-text-primary);
+  background-color: var(--color-page);
   -webkit-font-smoothing: antialiased;
   transition:
     background-color var(--duration-base) var(--easing-standard),
@@ -31,20 +32,26 @@ h3,
 h4 {
   margin: 0 0 var(--space-4);
   font-family: var(--font-heading);
-  font-weight: var(--font-weight-bold);
-  line-height: var(--line-height-tight);
+  line-height: var(--line-height-heading);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
 }
 
 h1 {
-  font-size: var(--font-size-3xl);
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-bold);
 }
 
 h2 {
-  font-size: var(--font-size-2xl);
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-h2);
 }
 
-h3 {
-  font-size: var(--font-size-xl);
+h3,
+h4 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0;
 }
 
 p {
@@ -52,8 +59,38 @@ p {
 }
 
 a {
-  color: var(--color-accent);
+  color: var(--color-interactive);
   text-underline-offset: 0.2em;
+}
+
+a:hover {
+  color: var(--color-interactive-hover);
+}
+
+/* Scientific values (RA/Dec, timestamps, IDs) are set in the monospace face. */
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-data);
+}
+
+.text-data {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-data);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.text-label {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-label);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--letter-spacing-label);
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
 }
 
 img,
@@ -72,6 +109,19 @@ textarea {
 
 button {
   cursor: pointer;
+}
+
+button,
+input,
+select,
+textarea,
+label {
+  font-family: var(--font-ui);
+}
+
+input,
+textarea {
+  font-family: var(--font-body);
 }
 
 :focus-visible {

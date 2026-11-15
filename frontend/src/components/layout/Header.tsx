@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import ThemeToggle from '../common/ThemeToggle';
+import ThemeSwitcher from '../common/ThemeSwitcher';
 import { ROUTES, type RouteTarget } from '../../routes/paths';
 import styles from './Header.module.css';
 
@@ -28,7 +28,7 @@ function Header({ title, backTo }: HeaderProps) {
         {title && <h1 className={styles.title}>{title}</h1>}
 
         <div className={styles.end}>
-          <ThemeToggle />
+          <ThemeSwitcher />
         </div>
       </div>
     </header>
