@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sky Sphere — protótipo</title>
+<style>
+  :root { color-scheme: dark; --fg: #e8ecf4; --muted: #9aa3b5; --panel: rgba(10, 14, 24, 0.72); --accent: #ff8a4c; }
+  html, body { margin: 0; height: 100%; background: #000; color: var(--fg); font: 14px/1.4 system-ui, -apple-system, sans-serif; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: grab; touch-action: none; }
+  canvas.dragging { cursor: grabbing; }
+  .panel { position: fixed; background: var(--panel); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px 12px; }
+  #info { top: 16px; left: 16px; max-width: calc(100vw - 56px); }
+  #info h1 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+  #info p { margin: 0; color: var(--muted); font-size: 12px; }
+  #controls { bottom: 16px; left: 16px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: calc(100vw - 56px); }
+  button { background: rgba(255,255,255,0.06); color: var(--fg); border: 1px solid rgba(255,255,255,0.14); border-radius: 6px; padding: 6px 10px; font: inherit; font-size: 13px; cursor: pointer; }
+  button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  #readout { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; margin-left: 6px; }
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; pointer-events: none; opacity: 0.6; }
+  #crosshair::before, #crosshair::after { content: ""; position: absolute; background: #fff; }
+  #crosshair::before { left: 6px; top: 0; width: 2px; height: 14px; }
+  #crosshair::after { top: 6px; left: 0; height: 2px; width: 14px; }
+  #target { position: fixed; left: 0; top: 0; width: 44px; height: 44px; margin: -22px 0 0 -22px; pointer-events: none; display: none; }
+  #target svg { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 0 3px rgba(0,0,0,0.8)); animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { transform: scale(1.12); } }
+  #target-box { display: none; z-index: 2; width: 230px; padding: 10px 12px 12px; font-size: 13px; }
+  #target-box header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  #target-box header strong { font-size: 13px; color: var(--accent); }
+  #target-box .close { background: none; border: 0; padding: 0 2px; font-size: 18px; line-height: 1; color: var(--muted); }
+  #target-box dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; font-variant-numeric: tabular-nums; }
+  #target-box dt { color: var(--muted); }
+  #target-box dd { margin: 0; text-align: right; }
+  #target-box dd small { display: block; color: var(--muted); font-size: 11px; }
+  #target-box hr { grid-column: 1 / -1; border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 3px 0; width: 100%; }
+</style>
+</head>
+<body>
+<canvas id="sky"></canvas>
+<div id="crosshair"></div>
+<div id="target" aria-hidden="true">
+  <svg viewBox="-22 -22 44 44" fill="none" stroke="#ff8a4c" stroke-width="2">
+    <circle r="12"/>
+    <circle r="2" fill="#ff8a4c" stroke="none"/>
+    <path d="M0 -21V-15M0 15V21M-21 0H-15M15 0H21" stroke-linecap="round"/>
+  </svg>
+</div>
+<section id="target-box" class="panel" aria-live="polite">
+  <header><strong>Alvo selecionado</strong><button class="close" id="target-close" aria-label="Remover alvo">×</button></header>
+  <dl>
+    <dt>RA</dt><dd><span id="t-ra"></span><small id="t-ra-hms"></small></dd>
+    <dt>Dec</dt><dd><span id="t-dec"></span><small id="t-dec-dms"></small></dd>
+    <hr>
+    <dt>l, b</dt><dd id="t-gal"></dd>
+    <dt>FOV</dt><dd id="t-fov"></dd>
+  </dl>
+</section>
+
+<div id="info" class="panel">
+  <h1>SPHEREx Sky Sphere</h1>
+  <p>Arraste para olhar em volta · clique para marcar um alvo · scroll/pinça para zoom</p>
+</div>
+
+<div id="controls" class="panel">
+  <button data-img="spherex-allsky.jpg" aria-pressed="true">SPHEREx (gás/poeira)</button>
+  <button data-img="starlight-allsky.jpg" aria-pressed="false">SPHEREx (estrelas)</button>
+  <button id="grid" aria-pressed="false">Grade galáctica</button>
+  <button id="reset">Recentrar</button>
+  <span id="readout"></span>
+</div>
+
+<script>
+// Protótipo: a imagem all-sky está em projeção Mollweide (elipse 2:1) em coordenadas galácticas.
+// Em vez de pré-converter a imagem, o fragment shader faz, para cada pixel da tela:
+//   direção da câmera -> (longitude, latitude) galáctica -> coordenada Mollweide -> UV na textura.
+// A câmera fica no centro da esfera, então vemos o céu "de dentro".
+
+const canvas = document.getElementById('sky');
+const gl = canvas.getContext('webgl', { antialias: false });
+if (!gl) { document.body.innerHTML = '<p style="padding:20px">WebGL indisponível neste navegador.</p>'; throw new Error('no webgl'); }
+
+const vert = `
+attribute vec2 aPos;
+void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+const frag = `
+precision highp float;
+uniform sampler2D uTex;
+uniform vec2 uRes;
+uniform vec3 uF, uR, uU;      // base da câmera: frente, direita, cima
+uniform float uFocal;          // 1 / tan(fov/2)
+uniform vec4 uEllipse;         // cx, cy, a, b em UV (0..1, origem no topo)
+uniform float uGrid;
+const float PI = 3.14159265359;
+
+void main() {
+  vec2 p = (gl_FragCoord.xy * 2.0 - uRes) / uRes.y;
+  vec3 dir = normalize(uF * uFocal + uR * p.x + uU * p.y);
+
+  // Mundo: +X = centro galáctico (l=0,b=0), +Y = polo norte galáctico.
+  // Longitude cresce para a esquerda (convenção do céu visto de dentro).
+  float lat = asin(clamp(dir.y, -1.0, 1.0));
+  float lon = atan(-dir.z, dir.x);
+
+  // Mollweide: resolver 2θ + sin 2θ = π sin φ (Newton em t = 2θ)
+  float target = PI * sin(lat);
+  float t = 2.0 * lat;
+  for (int i = 0; i < 12; i++) {
+    t -= (t + sin(t) - target) / max(1.0 + cos(t), 1e-5);
+  }
+  float theta = 0.5 * t;
+  float xn = (lon / PI) * cos(theta); // -1..1
+  float yn = sin(theta);              // -1..1
+
+  vec2 uv = vec2(uEllipse.x - xn * uEllipse.z, uEllipse.y - yn * uEllipse.w);
+  vec3 col = texture2D(uTex, uv).rgb;
+
+  if (uGrid > 0.5) {
+    float lonDeg = degrees(lon), latDeg = degrees(lat);
+    float w = degrees(2.0 / (uFocal * uRes.y)) * 0.8; // ~0.8 px de tela, em graus
+    float gLon = abs(fract(lonDeg / 30.0 + 0.5) - 0.5) * 30.0;
+    float gLat = abs(fract(latDeg / 30.0 + 0.5) - 0.5) * 30.0;
+    float line = max(step(gLon * cos(lat), w), step(gLat, w));
+    float eq = step(abs(latDeg), w * 1.5);
+    col = mix(col, vec3(0.45, 0.8, 1.0), line * 0.35);
+    col = mix(col, vec3(1.0, 0.85, 0.3), eq * 0.6);
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, vert));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, frag));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, 'aPos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const U = n => gl.getUniformLocation(prog, n);
+const u = { tex: U('uTex'), res: U('uRes'), F: U('uF'), R: U('uR'), Up: U('uU'), focal: U('uFocal'), ellipse: U('uEllipse'), grid: U('uGrid') };
+
+const tex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, tex);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+gl.uniform1i(u.tex, 0);
+
+// Detecta a elipse Mollweide na imagem (primeiro pixel claro a partir de cada borda,
+// na linha e coluna centrais) e recua alguns pixels para pular o contorno branco.
+function detectEllipse(img) {
+  const c = document.createElement('canvas');
+  c.width = img.naturalWidth; c.height = img.naturalHeight;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  const W = c.width, H = c.height;
+  const row = ctx.getImageData(0, H >> 1, W, 1).data;
+  const col = ctx.getImageData(W >> 1, 0, 1, H).data;
+  const lum = (d, i) => (d[i*4] + d[i*4+1] + d[i*4+2]) / 3;
+  const first = (d, n, rev) => { for (let k = 0; k < n; k++) { const i = rev ? n-1-k : k; if (lum(d, i) > 50) return i; } return rev ? n-1 : 0; };
+  const x0 = first(row, W, false), x1 = first(row, W, true);
+  const y0 = first(col, H, false), y1 = first(col, H, true);
+  const inset = Math.max(3, W / 600);
+  return {
+    cx: (x0 + x1) / 2 / W, cy: (y0 + y1) / 2 / H,
+    a: ((x1 - x0) / 2 - inset) / W, b: ((y1 - y0) / 2 - inset) / H,
+  };
+}
+
+let ready = false;
+function loadImage(src) {
+  const img = new Image();
+  img.onload = () => {
+    const e = detectEllipse(img);
+    console.log('Elipse detectada', src, e);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
+    gl.uniform4f(u.ellipse, e.cx, e.cy, e.a, e.b);
+    ready = true; requestDraw();
+  };
+  img.src = src;
+}
+
+// Câmera
+const view = { yaw: 0, pitch: 0, fov: 75 * Math.PI / 180 };
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+function basis() {
+  const cy = Math.cos(view.yaw), sy = Math.sin(view.yaw), cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
+  const F = [cp * cy, sp, cp * sy];
+  const R = [-sy, 0, cy];                       // F × (0,1,0), normalizado
+  const Up = [R[1]*F[2]-R[2]*F[1], R[2]*F[0]-R[0]*F[2], R[0]*F[1]-R[1]*F[0]]; // R × F
+  return { F, R, Up };
+}
+
+let gridOn = false, pending = false;
+function requestDraw() { if (!pending) { pending = true; requestAnimationFrame(draw); } }
+function draw() {
+  pending = false;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  gl.viewport(0, 0, w, h);
+  if (!ready) return;
+  const { F, R, Up } = basis();
+  gl.uniform2f(u.res, w, h);
+  gl.uniform3fv(u.F, F); gl.uniform3fv(u.R, R); gl.uniform3fv(u.Up, Up);
+  gl.uniform1f(u.focal, 1 / Math.tan(view.fov / 2));
+  gl.uniform1f(u.grid, gridOn ? 1 : 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  let l = Math.atan2(-F[2], F[0]) * 180 / Math.PI; if (l < 0) l += 360;
+  const b = Math.asin(F[1]) * 180 / Math.PI;
+  document.getElementById('readout').textContent =
+    `l ${l.toFixed(2)}°  b ${b >= 0 ? '+' : ''}${b.toFixed(2)}°  FOV ${(view.fov * 180 / Math.PI).toFixed(0)}°`;
+  updateTarget({ F, R, Up });
+}
+
+// ---------- Alvo: clique -> direção -> galáctico -> RA/Dec (ICRS / J2000) ----------
+const DEG = 180 / Math.PI;
+// Matriz equatorial (ICRS) -> galáctica (Hipparcos). Equatorial = transposta * galáctica.
+const EQ2GAL = [
+  [-0.0548755604162154, -0.8734370902348850, -0.4838350155487132],
+  [ 0.4941094278755837, -0.4448296299600112,  0.7469822444972189],
+  [-0.8676661490190047, -0.1980763734312015,  0.4559837761750669],
+];
+// Mundo do protótipo: +X = (l=0,b=0), +Y = polo norte galáctico, -Z = l=90°.
+const worldToGal = d => [d[0], -d[2], d[1]];
+function galToEq(g) {
+  const e = [0, 1, 2].map(j => EQ2GAL[0][j] * g[0] + EQ2GAL[1][j] * g[1] + EQ2GAL[2][j] * g[2]);
+  let ra = Math.atan2(e[1], e[0]) * DEG; if (ra < 0) ra += 360;
+  return { ra, dec: Math.asin(Math.max(-1, Math.min(1, e[2]))) * DEG };
+}
+function galLB(g) {
+  let l = Math.atan2(g[1], g[0]) * DEG; if (l < 0) l += 360;
+  return { l, b: Math.asin(g[2]) * DEG };
+}
+const pad = (n, w = 2) => String(n).padStart(w, '0');
+function raHMS(ra) {
+  let s = Math.round(ra / 15 * 3600 * 100) / 100;      // segundos de tempo, 2 casas
+  const h = Math.floor(s / 3600); s -= h * 3600;
+  const m = Math.floor(s / 60); s -= m * 60;
+  return `${pad(h % 24)}h ${pad(m)}m ${s.toFixed(2).padStart(5, '0')}s`;
+}
+function decDMS(dec) {
+  const sign = dec < 0 ? '−' : '+';
+  let s = Math.round(Math.abs(dec) * 3600 * 10) / 10;
+  const d = Math.floor(s / 3600); s -= d * 3600;
+  const m = Math.floor(s / 60); s -= m * 60;
+  return `${sign}${pad(d)}° ${pad(m)}′ ${s.toFixed(1).padStart(4, '0')}″`;
+}
+function fovText(rad) {
+  const deg = rad * DEG;
+  return deg >= 1 ? `${deg.toFixed(2)}° (${(deg * 60).toFixed(0)}′)` : `${(deg * 60).toFixed(2)}′ (${deg.toFixed(3)}°)`;
+}
+
+let target = null; // direção no mundo (vetor unitário)
+const targetEl = document.getElementById('target');
+const boxEl = document.getElementById('target-box');
+
+function screenToWorld(x, y) {
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  const px = (2 * x - W) / H, py = (H - 2 * y) / H;
+  const { F, R, Up } = basis(), f = 1 / Math.tan(view.fov / 2);
+  const d = [0, 1, 2].map(i => F[i] * f + R[i] * px + Up[i] * py);
+  const n = Math.hypot(...d);
+  return d.map(v => v / n);
+}
+
+function selectTarget(x, y) {
+  target = screenToWorld(x, y);
+  const g = worldToGal(target);
+  const { ra, dec } = galToEq(g);
+  const { l, b } = galLB(g);
+  document.getElementById('t-ra').textContent = `${ra.toFixed(5)}°`;
+  document.getElementById('t-ra-hms').textContent = raHMS(ra);
+  document.getElementById('t-dec').textContent = `${dec >= 0 ? '+' : '−'}${Math.abs(dec).toFixed(5)}°`;
+  document.getElementById('t-dec-dms').textContent = decDMS(dec);
+  document.getElementById('t-gal').textContent = `${l.toFixed(3)}°, ${b >= 0 ? '+' : '−'}${Math.abs(b).toFixed(3)}°`;
+  requestDraw();
+}
+
+// Reprojeta o alvo a cada quadro para que ele fique "preso" ao céu.
+function updateTarget({ F, R, Up }) {
+  if (!target) { targetEl.style.display = boxEl.style.display = 'none'; return; }
+  document.getElementById('t-fov').textContent = fovText(view.fov);
+  boxEl.style.display = 'block';
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  const dot = (a, c) => a[0] * c[0] + a[1] * c[1] + a[2] * c[2];
+  const z = dot(target, F);
+  const f = 1 / Math.tan(view.fov / 2);
+  const x = (dot(target, R) * f / z * H + W) / 2;
+  const y = (H - dot(target, Up) * f / z * H) / 2;
+  const visible = z > 0 && x > -30 && x < W + 30 && y > -30 && y < H + 30;
+  targetEl.style.display = visible ? 'block' : 'none';
+  if (visible) targetEl.style.transform = `translate(${x}px, ${y}px)`;
+
+  // Caixa ao lado do alvo; se o alvo sair da tela, fica fixa no canto superior direito.
+  const bw = boxEl.offsetWidth, bh = boxEl.offsetHeight, m = 12;
+  let bx, by;
+  if (visible) {
+    bx = x + 30 + bw + m > W ? x - 30 - bw : x + 30;
+    by = y - bh / 2;
+  } else { bx = W - bw - 16; by = 16; }
+  bx = Math.max(m, Math.min(W - bw - m, bx));
+  by = Math.max(m, Math.min(H - bh - m, by));
+  boxEl.style.left = `${bx}px`; boxEl.style.top = `${by}px`;
+}
+document.getElementById('target-close').addEventListener('click', () => { target = null; requestDraw(); });
+
+// Interação: arrastar (mouse/toque) e zoom (scroll / pinça)
+const pointers = new Map();
+let pinchDist = 0;
+let tap = null; // candidato a clique: só vira alvo se o ponteiro quase não se mover
+canvas.addEventListener('pointerdown', e => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  tap = pointers.size === 1 ? { x: e.clientX, y: e.clientY } : null;
+  canvas.classList.add('dragging');
+});
+canvas.addEventListener('pointermove', e => {
+  const prev = pointers.get(e.pointerId); if (!prev) return;
+  const cur = { x: e.clientX, y: e.clientY };
+  if (tap && Math.hypot(cur.x - tap.x, cur.y - tap.y) > 5) tap = null;
+  if (pointers.size === 1) {
+    const k = view.fov / canvas.clientHeight;      // radianos por pixel (aprox.)
+    view.yaw -= (cur.x - prev.x) * k;
+    view.pitch = clamp(view.pitch + (cur.y - prev.y) * k, -Math.PI / 2 + 0.001, Math.PI / 2 - 0.001);
+  } else if (pointers.size === 2) {
+    pointers.set(e.pointerId, cur);
+    const [a, b] = [...pointers.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinchDist) zoom(pinchDist / d, (a.x + b.x) / 2, (a.y + b.y) / 2);
+    pinchDist = d;
+  }
+  pointers.set(e.pointerId, cur);
+  requestDraw();
+});
+const up = e => { pointers.delete(e.pointerId); pinchDist = 0; if (!pointers.size) canvas.classList.remove('dragging'); };
+canvas.addEventListener('pointerup', e => {
+  if (tap && pointers.size === 1) selectTarget(e.clientX, e.clientY);
+  tap = null; up(e);
+});
+canvas.addEventListener('pointercancel', e => { tap = null; up(e); });
+// Zoom ancorado no cursor: o ponto do céu sob o cursor continua sob o cursor.
+function zoom(factor, x = canvas.clientWidth / 2, y = canvas.clientHeight / 2) {
+  const anchor = screenToWorld(x, y);
+  view.fov = clamp(view.fov * factor, 2 * Math.PI / 180, 120 * Math.PI / 180);
+  for (let i = 0; i < 3; i++) {
+    const now = screenToWorld(x, y);
+    view.yaw += Math.atan2(anchor[2], anchor[0]) - Math.atan2(now[2], now[0]);
+    view.pitch = clamp(view.pitch + Math.asin(anchor[1]) - Math.asin(now[1]), -Math.PI / 2 + 0.001, Math.PI / 2 - 0.001);
+  }
+  requestDraw();
+}
+canvas.addEventListener('wheel', e => { e.preventDefault(); zoom(Math.exp(e.deltaY * 0.001), e.clientX, e.clientY); }, { passive: false });
+
+document.querySelectorAll('[data-img]').forEach(btn => btn.addEventListener('click', () => {
+  document.querySelectorAll('[data-img]').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+  loadImage(btn.dataset.img);
+}));
+document.getElementById('grid').addEventListener('click', e => {
+  gridOn = !gridOn; e.currentTarget.setAttribute('aria-pressed', String(gridOn)); requestDraw();
+});
+document.getElementById('reset').addEventListener('click', () => { view.yaw = 0; view.pitch = 0; view.fov = 75 * Math.PI / 180; requestDraw(); });
+window.addEventListener('resize', requestDraw);
+
+loadImage('spherex-allsky.jpg');
+</script>
+</body>
+</html>
