@@ -19,3 +19,7 @@
   margin: 0;
   color: var(--color-text-muted);
 }
+
+.mapLink {
+  margin-top: var(--space-3);
+}
