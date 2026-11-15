@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>SPHEREx Temporal Lab</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">NASA · SPHEREx · laboratório local</p>
+          <h1>Explorador temporal</h1>
+          <p class="intro">
+            Descubra as épocas disponíveis para uma coordenada, veja o primeiro
+            frame assim que ele ficar pronto e acompanhe o restante em segundo plano.
+          </p>
+        </div>
+        <div class="status-pill" id="serviceStatus">Verificando serviço…</div>
+      </header>
+
+      <nav class="view-tabs" role="tablist" aria-label="Áreas do laboratório">
+        <button
+          class="tab-button active"
+          id="exploreTabButton"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="exploreTab"
+        >
+          Explorar
+        </button>
+        <button
+          class="tab-button"
+          id="historyTabButton"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="historyTab"
+        >
+          Histórico <span class="history-count" id="historyCountBadge">0</span>
+        </button>
+      </nav>
+
+      <div id="exploreTab" role="tabpanel" aria-labelledby="exploreTabButton">
+        <section class="search-panel" aria-labelledby="search-title">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Entrada</p>
+            <h2 id="search-title">Coordenadas ICRS</h2>
+          </div>
+          <p class="fixed-config">D3 · recorte 45′ → janela 30′ · máximo 100 frames</p>
+        </div>
+
+        <form id="searchForm">
+          <label>
+            <span>Ascensão reta · RA</span>
+            <input id="raInput" name="ra" type="number" step="any" min="0" max="359.999999" value="133.795129167" required />
+          </label>
+          <label>
+            <span>Declinação · Dec</span>
+            <input id="decInput" name="dec" type="number" step="any" min="-90" max="90" value="-7.245147222" required />
+          </label>
+          <label>
+            <span>Estratégia temporal</span>
+            <select id="modeInput" name="mode">
+              <option value="fast">Rápida · melhor bloco de até 4</option>
+              <option value="balanced" selected>Balanceada · até 12 épocas</option>
+              <option value="full">Completa · todas as épocas</option>
+            </select>
+          </label>
+          <button class="primary-button" id="searchButton" type="submit">
+            Buscar sequência
+          </button>
+        </form>
+
+        <div class="timing-grid" aria-live="polite">
+          <div>
+            <span>Tempo total</span>
+            <strong id="totalTimer">0,0 s</strong>
+          </div>
+          <div>
+            <span>Descoberta</span>
+            <strong id="discoveryTimer">—</strong>
+          </div>
+          <div>
+            <span>Frame atual</span>
+            <strong id="frameTimer">—</strong>
+          </div>
+          <div>
+            <span>Origem</span>
+            <strong id="cacheStatus">—</strong>
+          </div>
+          <div>
+            <span>Pré-carregamento</span>
+            <strong id="prefetchProgress">—</strong>
+          </div>
+        </div>
+        <p class="message" id="message" role="status">Pronto para consultar.</p>
+        </section>
+
+        <section class="viewer-panel" id="viewerPanel" aria-labelledby="viewer-title" hidden>
+        <div class="section-heading viewer-heading">
+          <div>
+            <p class="section-kicker">Sequência</p>
+            <h2 id="viewer-title">Frame <span id="frameCounter">1 / 1</span></h2>
+          </div>
+          <div class="viewer-actions">
+            <button class="ghost-button danger" id="clearDatasetButton" type="button">Limpar este cache</button>
+            <button class="ghost-button" id="clearAllButton" type="button">Limpar tudo</button>
+          </div>
+        </div>
+
+        <div class="image-stage">
+          <img id="frameImage" alt="Frame temporal SPHEREx" />
+          <div class="loading-overlay" id="loadingOverlay" hidden>
+            <span class="spinner" aria-hidden="true"></span>
+            <strong id="loadingTitle">Carregando primeira imagem…</strong>
+            <small>Todos os FITS da sequência serão preparados em segundo plano.</small>
+          </div>
+        </div>
+
+        <div class="frame-metadata">
+          <div>
+            <span>Observação</span>
+            <strong id="observationId">—</strong>
+          </div>
+          <div>
+            <span>Data UTC</span>
+            <strong id="observedAt">—</strong>
+          </div>
+          <div>
+            <span>Intervalo anterior</span>
+            <strong id="frameGap">—</strong>
+          </div>
+          <div>
+            <span>Frames / alinhamento</span>
+            <strong id="availableCount">—</strong>
+          </div>
+        </div>
+
+        <div class="timeline-controls">
+          <button class="step-button" id="previousButton" type="button" aria-label="Frame anterior">←</button>
+          <label for="frameSlider">Navegar pelas épocas</label>
+          <input id="frameSlider" type="range" min="0" max="0" value="0" step="1" />
+          <button class="step-button" id="nextButton" type="button" aria-label="Próximo frame">→</button>
+        </div>
+        <p class="slider-hint">Arraste livremente; frames ainda em processamento aparecem automaticamente assim que ficarem prontos.</p>
+        </section>
+      </div>
+
+      <section
+        class="history-panel"
+        id="historyTab"
+        role="tabpanel"
+        aria-labelledby="historyTabButton"
+        hidden
+      >
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Consultas recentes</p>
+            <h2>Histórico de coordenadas</h2>
+          </div>
+          <button class="ghost-button danger" id="clearHistoryButton" type="button">
+            Limpar histórico
+          </button>
+        </div>
+        <p class="history-description">
+          As coordenadas ficam salvas neste navegador, mesmo quando o cache científico é apagado.
+        </p>
+        <div class="history-list" id="historyList"></div>
+        <div class="history-empty" id="historyEmpty">
+          <strong>Nenhuma coordenada consultada ainda.</strong>
+          <span>Faça uma busca na aba Explorar para criar o primeiro item.</span>
+        </div>
+      </section>
+    </main>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>
