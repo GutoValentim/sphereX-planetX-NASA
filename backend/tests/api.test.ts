@@ -176,34 +176,58 @@ test('image consultation forwards sequence options and exposes frames through /a
   assert.equal((await fetch(`${url}/api/sequencias/arquivos/0123456789abcdef/fits/x/a.fits`)).status, 404);
   assert.equal((await fetch(`${url}/api/consulta?RA=10&DEC=-5&Data=2026-11-14&modo=a%20b`)).status, 400);
 });
-test('catalog merges lab exports, newest engine first, and serves only target files', async () => {
+test('catalog keeps the published engine until a newer export is 100% ready', async () => {
   const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const root = await mkdtemp(join(tmpdir(), 'spherex-catalog-'));
+  const bands = ['D1', 'D2', 'D3', 'D4', 'D5', 'D6'].map((band) => `SPHEREx-${band}`);
+  const complete = (engine: string) => JSON.stringify({
+    engine,
+    sequences: [{ bandpasses: bands, omitted_bandpasses: [] }],
+    spectrum: Object.fromEntries(['dark', 'light'].map((theme) => [theme, {
+      bands: bands.map((bandpass) => ({ bandpass, chart_url: `spectrum/${theme}/${bandpass}.svg`, error: null })),
+    }])),
+  });
+  const partial = (engine: string) => JSON.stringify({
+    engine,
+    sequences: [{ bandpasses: bands.slice(0, 3), omitted_bandpasses: bands.slice(3) }],
+    spectrum: {},
+  });
   try {
     const target = (id: string, slug: string, name: string) => ({ id, slug, name, ra_deg: 1, dec_deg: 2, manifest: `${slug}/manifest.json` });
-    await mkdir(join(root, 'v1', 'vega-aaa', 'frames'), { recursive: true });
-    await mkdir(join(root, 'v2', 'vega-aaa'), { recursive: true });
-    await writeFile(join(root, 'v1', 'index.json'), JSON.stringify({ targets: [target('aaa', 'vega-aaa', 'Vega'), target('bbb', 'altair-bbb', 'Altair'), { id: 'x', slug: '../etc' }] }));
-    await writeFile(join(root, 'v2', 'index.json'), JSON.stringify({ targets: [target('aaa', 'vega-aaa', 'Vega v2')] }));
-    await writeFile(join(root, 'v1', 'vega-aaa', 'manifest.json'), '{"engine":"v1"}');
-    await writeFile(join(root, 'v1', 'vega-aaa', 'frames', 'a.webp'), 'webp');
-    await writeFile(join(root, 'v2', 'vega-aaa', 'manifest.json'), '{"engine":"v2"}');
+    for (const engine of ['v1', 'v2']) {
+      for (const slug of ['vega-aaa', 'deneb-ccc']) await mkdir(join(root, engine, slug, 'frames'), { recursive: true });
+    }
+    await mkdir(join(root, 'v2', 'altair-bbb'), { recursive: true });
+    await writeFile(join(root, 'v1', 'index.json'), JSON.stringify({ targets: [target('aaa', 'vega-aaa', 'Vega'), target('ccc', 'deneb-ccc', 'Deneb'), { id: 'x', slug: '../etc' }] }));
+    await writeFile(join(root, 'v2', 'index.json'), JSON.stringify({ targets: [target('aaa', 'vega-aaa', 'Vega v2'), target('ccc', 'deneb-ccc', 'Deneb v2'), target('bbb', 'altair-bbb', 'Altair')] }));
+    // Vega: v2 still partial → v1 stays. Deneb: v2 complete → v2 replaces v1. Altair: only v2 (partial).
+    await writeFile(join(root, 'v1', 'vega-aaa', 'manifest.json'), partial('v1'));
+    await writeFile(join(root, 'v1', 'vega-aaa', 'frames', 'a.webp'), 'webp v1');
+    await writeFile(join(root, 'v2', 'vega-aaa', 'manifest.json'), partial('v2'));
+    await writeFile(join(root, 'v1', 'deneb-ccc', 'manifest.json'), complete('v1'));
+    await writeFile(join(root, 'v2', 'deneb-ccc', 'manifest.json'), complete('v2'));
+    await writeFile(join(root, 'v2', 'altair-bbb', 'manifest.json'), partial('v2'));
     await writeFile(join(root, 'CREDENTIALS.txt'), 'secret');
 
     const url = await listen(createServer(createApp({ catalogDir: root })));
     const index = await (await fetch(`${url}/api/catalogo/index.json`)).json();
-    assert.deepEqual(index.targets.map((item: { name: string; engine: string }) => `${item.name}@${item.engine}`), ['Altair@v1', 'Vega v2@v2']);
+    assert.deepEqual(index.targets.map((item: { name: string; engine: string }) => `${item.name}@${item.engine}`), ['Altair@v2', 'Deneb v2@v2', 'Vega@v1']);
 
-    const manifest = await fetch(`${url}/api/catalogo/vega-aaa/manifest.json`);
-    assert.equal(manifest.status, 200);
-    assert.deepEqual(await manifest.json(), { engine: 'v2' });
-    // The newest engine owns the target: files it did not export are not mixed in from older ones.
-    assert.equal((await fetch(`${url}/api/catalogo/vega-aaa/frames/a.webp`)).status, 404);
+    assert.equal((await (await fetch(`${url}/api/catalogo/vega-aaa/manifest.json`)).json()).engine, 'v1');
+    assert.equal(await (await fetch(`${url}/api/catalogo/vega-aaa/frames/a.webp`)).text(), 'webp v1');
+    assert.equal((await (await fetch(`${url}/api/catalogo/deneb-ccc/manifest.json`)).json()).engine, 'v2');
+    // Files come only from the chosen engine: Deneb's v1 frames are not mixed in.
+    assert.equal((await fetch(`${url}/api/catalogo/deneb-ccc/frames/a.webp`)).status, 404);
     for (const path of ['vega-aaa/..%2F..%2FCREDENTIALS.txt', 'vega-aaa/../../CREDENTIALS.txt', 'Vega/manifest.json', 'vega-aaa/manifest.txt']) {
       assert.equal((await fetch(`${url}/api/catalogo/${path}`)).status, 404, path);
     }
+
+    // When the newer export becomes complete, it takes over (manifests are re-read when they change).
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await writeFile(join(root, 'v2', 'vega-aaa', 'manifest.json'), complete('v2'));
+    assert.equal((await (await fetch(`${url}/api/catalogo/vega-aaa/manifest.json`)).json()).engine, 'v2');
 
     const unconfigured = await listen(createServer(createApp({ catalogDir: '' })));
     assert.equal((await fetch(`${unconfigured}/api/catalogo/index.json`)).status, 503);
@@ -219,6 +243,7 @@ test('catalog serves exported images with their content type', async () => {
   try {
     await mkdir(join(root, 'v1', 'vega-aaa', 'frames', '30-native', 'limpa-color', 'D1'), { recursive: true });
     await mkdir(join(root, 'v1', 'vega-aaa', 'spectrum', 'dark'), { recursive: true });
+    await writeFile(join(root, 'v1', 'index.json'), JSON.stringify({ targets: [{ id: 'aaa', slug: 'vega-aaa', name: 'Vega' }] }));
     await writeFile(join(root, 'v1', 'vega-aaa', 'manifest.json'), '{}');
     await writeFile(join(root, 'v1', 'vega-aaa', 'frames', '30-native', 'limpa-color', 'D1', '001_x.webp'), 'webp');
     await writeFile(join(root, 'v1', 'vega-aaa', 'spectrum', 'dark', 'combined.svg'), '<svg/>');

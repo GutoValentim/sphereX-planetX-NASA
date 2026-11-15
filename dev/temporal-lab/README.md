@@ -85,8 +85,9 @@ fotometria (`SPECTRUM_VERSION`) permanece igual, pois seu contrato não mudou.
   imagens renderizadas, espectro por banda e as falhas do último mapeamento.
   Com um plano de mapeamento, o “100%” mede o que foi pedido; explorações
   avulsas em outros FOVs aparecem com badge tracejado.
-- **Apagar…** pede confirmação e remove do motor selecionado o cache e a
-  exportação daquele alvo (opcionalmente o registro). Não existe “limpar tudo”.
+- **Não há como apagar** registros nem caches pela interface: cada alvo mapeado custa horas de
+  download do IRSA. A API responde 403 a `DELETE /api/records/<id>` e `DELETE /api/e/<v>/cache/…`;
+  só com `SPHEREX_LAB_ALLOW_DELETE=1` (uso administrativo, por `curl`) a exclusão volta a funcionar.
 
 ## Exportação para o produto
 
