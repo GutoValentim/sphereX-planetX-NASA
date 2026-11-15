@@ -1,19 +1,40 @@
+import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import ButtonLink from '../common/ButtonLink';
 import HeroBackground from './HeroBackground';
 import { ROUTES } from '../../routes/paths';
 import styles from './HeroSection.module.css';
 
 function HeroSection() {
+  const sectionRef = useRef<HTMLElement>(null);
+  const backdrop = document.getElementById('hero-backdrop');
+
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section || !backdrop) {
+      return;
+    }
+
+    const syncHeight = () => {
+      backdrop.style.height = `${section.offsetHeight}px`;
+    };
+
+    syncHeight();
+    const observer = new ResizeObserver(syncHeight);
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, [backdrop]);
+
   return (
-    <section className={styles.hero} aria-labelledby="hero-title">
-      <HeroBackground />
+    <section ref={sectionRef} className={styles.hero} aria-labelledby="hero-title">
+      {backdrop ? createPortal(<HeroBackground />, backdrop) : null}
       <div className={styles.content}>
-        <p className={styles.eyebrow}>NASA Space Apps Challenge</p>
+        <p className={styles.eyebrow}>T.A.R.S - Team for Advanced Research of Space</p>
         <h1 id="hero-title" className={styles.title}>
-          SPHEREx
+          CosmoSPHERE
         </h1>
         <h1 id="hero-subtitle" className={styles.brand}>
-          Sky and Time Explorer
+          SPHEREx Explorer
         </h1>
         <p className={styles.intro}>
           Explore observations from NASA’s SPHEREx mission. Choose a position in the sky and a date, and Sky
