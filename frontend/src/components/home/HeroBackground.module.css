@@ -1,0 +1,66 @@
+.background {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background: var(--hero-sky);
+}
+
+/* Oversized so the slow drift never exposes its edges. */
+.glow {
+  position: absolute;
+  inset: -12%;
+  background: var(--hero-glow);
+  animation: glowDrift 32s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+.photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity var(--duration-slow) var(--easing-standard);
+  animation: photoDrift 60s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+.photo[data-loaded='true'] {
+  opacity: 1;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--hero-photo-overlay);
+}
+
+@keyframes glowDrift {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  to {
+    transform: translate3d(-4%, 3%, 0) scale(1.06);
+  }
+}
+
+@keyframes photoDrift {
+  from {
+    transform: scale(1.04) translate3d(0, 0, 0);
+  }
+
+  to {
+    transform: scale(1.12) translate3d(-1.5%, -1%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glow,
+  .photo {
+    animation: none;
+  }
+}

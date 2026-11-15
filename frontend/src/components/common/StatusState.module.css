@@ -1,0 +1,32 @@
+/* Shared layout for LoadingState, ErrorState and EmptyState. */
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text);
+}
+
+.message {
+  margin: 0;
+  max-width: 36rem;
+}
+
+.error .title {
+  color: var(--color-danger);
+}
+
+.spinner {
+  color: var(--color-accent);
+}

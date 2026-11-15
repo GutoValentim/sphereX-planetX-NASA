@@ -1,0 +1,12 @@
+.reveal {
+  opacity: 0;
+  transform: translate3d(0, 1.25rem, 0);
+  transition:
+    opacity var(--duration-slow) var(--easing-standard) var(--reveal-delay, 0ms),
+    transform var(--duration-slow) var(--easing-standard) var(--reveal-delay, 0ms);
+}
+
+.reveal[data-revealed='true'] {
+  opacity: 1;
+  transform: none;
+}

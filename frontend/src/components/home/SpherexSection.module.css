@@ -1,0 +1,66 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(14rem, 0.85fr);
+  gap: var(--space-6);
+  align-items: center;
+}
+
+.copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.text {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.figure {
+  margin: 0;
+}
+
+.media,
+.slot {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: var(--radius-md);
+}
+
+.media {
+  object-fit: cover;
+  background-color: var(--color-viewer-background);
+}
+
+.slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  text-align: center;
+  color: var(--color-on-viewer);
+  background:
+    radial-gradient(circle at 50% 55%, rgb(255 165 79 / 28%) 0, rgb(255 165 79 / 0%) 42%),
+    linear-gradient(160deg, #12182e 0%, #070a18 100%);
+  border: var(--border-width) dashed color-mix(in srgb, var(--color-on-viewer) 35%, transparent);
+}
+
+.slotLabel {
+  font-family: var(--font-heading);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.slotHint {
+  max-width: 16rem;
+  font-size: var(--font-size-xs);
+  opacity: 0.75;
+}
+
+@media (max-width: 48rem) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
