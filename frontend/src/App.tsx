@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import ParallaxWallpaper from './assets/wallpapers/ParallaxWallpaper';
 import LoadingState from './components/common/LoadingState';
 import PageContainer from './components/layout/PageContainer';
 import Home from './pages/Home';
@@ -16,21 +17,25 @@ function App() {
   return (
     <BrowserRouter>
       <ScrollToTop />
-      <Suspense
-        fallback={
-          <PageContainer>
-            <LoadingState message="Loading page…" />
-          </PageContainer>
-        }
-      >
-        <Routes>
-          <Route path={ROUTES.home} element={<Home />} />
-          <Route path={ROUTES.explore} element={<ExploreTheSky />} />
-          <Route path={ROUTES.sky} element={<ExploreMap />} />
-          <Route path={ROUTES.viewer} element={<SeeTheSky />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </Suspense>
+      <div id="hero-backdrop" className="hero-backdrop" />
+      <ParallaxWallpaper />
+      <div className="parallax-content">
+        <Suspense
+          fallback={
+            <PageContainer>
+              <LoadingState message="Loading page…" />
+            </PageContainer>
+          }
+        >
+          <Routes>
+            <Route path={ROUTES.home} element={<Home />} />
+            <Route path={ROUTES.explore} element={<ExploreTheSky />} />
+            <Route path={ROUTES.sky} element={<ExploreMap />} />
+            <Route path={ROUTES.viewer} element={<SeeTheSky />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
+      </div>
     </BrowserRouter>
   );
 }

@@ -12,9 +12,9 @@ export const SPHEREX_SECTION: HomeSectionCopy = {
 
 export const EXPLORER_SECTION: HomeSectionCopy = {
   id: 'sky-explorer',
-  title: 'Sky Explorer — NASA Space Apps Challenge',
+  title: 'CosmoSPHERE - SPHEREx Cosmos Explorer',
   paragraphs: [
-    'Sky Explorer is being built for the NASA Space Apps Challenge. Choose a position in the sky, a date and a spectral band, and the matching observation opens below.',
+    'CosmoSPHERE is system built for the NASA Space Apps Challenge. Choose a coordinate or a position in the cosmos map, and the corresponding SPHEREx observation will be displayed. With this system, you can monitor moving objects, spectral bands and much more!',
   ],
 };
 

@@ -16,9 +16,15 @@
           var stored = localStorage.getItem('sky-explorer-theme');
           var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
           // 'system' or a missing value follows the OS color scheme.
-          var theme = stored === 'light' || stored === 'dark' ? stored : prefersDark ? 'dark' : 'light';
+          var theme = 'light';
+          if (stored === 'light' || stored === 'dark') {
+            theme = stored;
+          } else if (prefersDark) {
+            theme = 'dark';
+          }
           document.documentElement.dataset.theme = theme;
-        } catch (error) {
+        } catch {
+          // localStorage throws when storage is blocked. Light is applied so the page still paints.
           document.documentElement.dataset.theme = 'light';
         }
       })();
