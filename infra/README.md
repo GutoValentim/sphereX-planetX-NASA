@@ -1,6 +1,6 @@
 # SPHEREx na VPS Oracle
 
-Esta stack tem três serviços: `frontend` e `api` (Node, publicados pelo Traefik) e `python` (FastAPI, sem publicação). Usa a rede externa `web` e o Traefik já existente; `api` e `python` também compartilham a rede privada `spherex_internal`, pela qual a API chama `http://spherex-python:8000`. Não publica portas adicionais no host e não recria outros projetos. O Compose é exclusivo deste projeto; não execute `docker compose down` no diretório das outras aplicações.
+Esta stack tem quatro serviços: `frontend` e `api` (Node, publicados pelo Traefik), `python` (FastAPI, sem publicação) e `lab` (laboratório de mapeamento em `dev/temporal-lab`, publicado em `lab.spherex…` com senha). Usa a rede externa `web` e o Traefik já existente; `api` e `python` também compartilham a rede privada `spherex_internal`, pela qual a API chama `http://spherex-python:8000`. Não publica portas adicionais no host e não recria outros projetos. O Compose é exclusivo deste projeto; não execute `docker compose down` no diretório das outras aplicações.
 
 ## Pipeline
 
@@ -9,17 +9,18 @@ Esta stack tem três serviços: `frontend` e `api` (Node, publicados pelo Traefi
 - **Backend:** instala as dependências Node, executa ESLint, TypeScript, testes da API e build.
 - **Python:** instala `backend/requirements-dev.txt` e executa os testes do núcleo científico e do FastAPI.
 - **Frontend:** instala as dependências Node, executa ESLint, TypeScript, testes do servidor e build Vite.
+- **Lab:** ESLint de `dev/`, testes do laboratório (Python e Node) e um smoke test que sobe o gateway com autenticação e o motor `v1`.
 - **Infra:** verifica a sintaxe dos scripts Bash e executa os testes Python de deploy.
 
-Arquivos `backend/**/*.py` e `backend/requirements*.txt` pertencem ao serviço Python; o restante de `backend/` pertence à API Node. Se arquivos de um serviço mudarem sem alterações em `infra/`, esse serviço é publicado quando seu próprio CI passar, independentemente dos demais. Alterações em `infra/` acionam um deploy da stack inteira e exigem sucesso de todos os CIs. A execução manual também valida e publica a stack inteira. PRs apenas validam; o merge gera o push que publica.
+Arquivos `backend/**/*.py` e `backend/requirements*.txt` pertencem ao serviço Python e também ao `lab` (que congela esse código em versões do motor); `dev/temporal-lab/**` pertence só ao `lab`; o restante de `backend/` pertence à API Node. Se arquivos de um serviço mudarem sem alterações em `infra/`, esse serviço é publicado quando seu próprio CI passar, independentemente dos demais. Alterações em `infra/` acionam um deploy da stack inteira e exigem sucesso de todos os CIs. A execução manual também valida e publica a stack inteira. PRs apenas validam; o merge gera o push que publica.
 
-Após o CI passar, o job de deploy usa uma chave SSH exclusiva do usuário `spherex-deploy`. A chave aceita somente `deploy <SHA de 40 caracteres> [api|frontend|python|stack]`; não abre shell, SFTP, túnel ou encaminhamento de portas. O secret `SPHEREX_SSH_PRIVATE_KEY` já foi configurado no repositório. A chave local está em `~/.ssh/spherex_github_actions_ed25519`; não a versione. `ssh_known_hosts` contém somente as chaves públicas do servidor já confiadas por este Mac.
+Após o CI passar, o job de deploy usa uma chave SSH exclusiva do usuário `spherex-deploy`. A chave aceita somente `deploy <SHA de 40 caracteres> [api|frontend|python|lab|stack]`; não abre shell, SFTP, túnel ou encaminhamento de portas. O secret `SPHEREX_SSH_PRIVATE_KEY` já foi configurado no repositório. A chave local está em `~/.ssh/spherex_github_actions_ed25519`; não a versione. `ssh_known_hosts` contém somente as chaves públicas do servidor já confiadas por este Mac.
 
 A VPS busca o repositório público por HTTPS e publica exatamente o commit aprovado. Um lock na VPS serializa deploys. Execuções de commits superados pela `main` são ignoradas para evitar regressão por ordem de conclusão do CI.
 
-O build dos serviços Node roda em um container temporário `node:24-bookworm-slim` com limite de 1 GB e 1 CPU. O deploy de API compila somente o backend; o de frontend compila somente o frontend. Ambos instalam pelo lockfile e removem dependências de desenvolvimento. O build Python roda em `python:3.12-slim-bookworm` (2 GB, 1 CPU) e cria um venv em `/app/.venv` dentro da release com `backend/requirements.txt`. Um deploy de stack prepara os três. Os containers finais usam as mesmas imagens oficiais; não há imagem própria, registry ou servidor de desenvolvimento em produção. Todos rodam sem root, com filesystem e código somente leitura, limites de memória/CPU e logs rotacionados. O Python tem 2 GB/1 CPU e grava apenas em `/opt/docker/spherex/cache` (montado em `/cache`) e no `/tmp` em memória.
+O build dos serviços Node roda em um container temporário `node:24-bookworm-slim` com limite de 1 GB e 1 CPU. O deploy de API compila somente o backend; o de frontend compila somente o frontend. Ambos instalam pelo lockfile e removem dependências de desenvolvimento. O build Python roda em `python:3.12-slim-bookworm` (2 GB, 1 CPU) e cria um venv em `/app/.venv` dentro da release com `backend/requirements.txt`. A release do `lab` reaproveita a release Python do mesmo commit quando ela existe (mesmo venv e mesmo caminho `/app`); senão faz o mesmo build. Um deploy de stack prepara os três. Os containers finais usam as mesmas imagens oficiais; não há imagem própria, registry ou servidor de desenvolvimento em produção. Todos rodam sem root, com filesystem e código somente leitura, limites de memória/CPU e logs rotacionados. O Python tem 2 GB/1 CPU e grava apenas em `/opt/docker/spherex/cache` (montado em `/cache`) e no `/tmp` em memória.
 
-As releases ficam em `/opt/docker/spherex/releases/<api|frontend|python>/<SHA>`. Os links `/opt/docker/spherex/current-api`, `current-frontend` e `current-python` são atualizados atomicamente; um deploy de serviço recria somente esse container, enquanto um deploy de stack recria todos. Cada serviço mantém sua própria versão, indicada por seu `/healthz`. Existe uma breve interrupção durante a recriação do serviço atualizado; este fluxo não oferece zero downtime.
+As releases ficam em `/opt/docker/spherex/releases/<api|frontend|python|lab>/<SHA>`. Os links `/opt/docker/spherex/current-api`, `current-frontend`, `current-python` e `current-lab` são atualizados atomicamente; um deploy de serviço recria somente esse container, enquanto um deploy de stack recria todos. Cada serviço mantém sua própria versão, indicada por seu `/healthz`. Existe uma breve interrupção durante a recriação do serviço atualizado; este fluxo não oferece zero downtime.
 
 O SHA vem do arquivo gerado `.release.env`, incluído em cada release. Se a subida ou o healthcheck falhar, o script restaura a release anterior do serviço; em deploy de stack, também restaura o Compose anterior. Um serviço sem release anterior (por exemplo, o primeiro deploy do Python) é removido no rollback. Se o build falhar, as versões em execução permanecem ativas. Para cada serviço, são mantidas as releases ativa e anterior, além das três outras mais recentes.
 
@@ -31,6 +32,7 @@ O SHA vem do arquivo gerado `.release.env`, incluído em cada release. Se a subi
 - `/opt/docker/spherex/repository.git`: clone bare do repositório público.
 - `/opt/docker/spherex/api-current-sha`, `frontend-current-sha` e `python-current-sha`: últimas releases publicadas de cada serviço.
 - `/opt/docker/spherex/cache`: cache gravável do Python (UID 1000); pode ser apagado, tudo é regenerável.
+- `/opt/docker/spherex/lab`: acervo do laboratório (UID 1000): motores congelados, registros, caches por versão e `exports/` para o produto. **Não é regenerável sem horas de download do IRSA; não apague.** `CREDENTIALS.txt` tem o usuário e a senha do lab (gerados no primeiro start; para trocar, apague `auth.json` e `CREDENTIALS.txt` e reinicie o container).
 - `/opt/docker/spherex/current-sha`: SHA do último deploy concluído.
 - `/usr/local/sbin/spherex-deploy`: cópia root-owned de `deploy.sh`.
 - `/usr/local/bin/spherex-ssh-deploy`: cópia root-owned do comando SSH restrito.
@@ -61,6 +63,7 @@ Crie os dois registros A no Cloudflare apontando para `150.230.73.212`:
 | --- | --- |
 | `spherex` | `150.230.73.212` |
 | `api.spherex` | `150.230.73.212` |
+| `lab.spherex` | `150.230.73.212` |
 
 Comece com **Somente DNS** (nuvem cinza): o resolver existente `lets-encrypt` usa TLS-ALPN e precisa alcançar a VPS diretamente na porta 443 para emitir e renovar certificados. Não ative proxy laranja enquanto este método de validação for usado. Não crie AAAA sem configurar IPv6 na VPS. A rota HTTP já redireciona para HTTPS no Traefik existente.
 
@@ -69,6 +72,7 @@ Depois da propagação, valide os certificados sem `-k`:
 ```sh
 curl --fail https://api.spherex.prospectordigital.com.br/healthz
 curl --fail https://spherex.prospectordigital.com.br/healthz
+curl -s -o /dev/null -w '%{http_code}\n' https://lab.spherex.prospectordigital.com.br/   # 401 sem senha
 ```
 
 O frontend usa `VITE_API_BASE_URL=https://api.spherex.prospectordigital.com.br` no build. A API permite CORS somente para `https://spherex.prospectordigital.com.br`. Alterar o domínio da API exige um novo build: ajuste a configuração da VPS e publique um novo commit, para gerar uma release com outro SHA.
@@ -84,6 +88,14 @@ sudo cat /opt/docker/spherex/current-sha
 sudo cat /opt/docker/spherex/api-current-sha
 sudo cat /opt/docker/spherex/frontend-current-sha
 sudo cat /opt/docker/spherex/python-current-sha
+sudo cat /opt/docker/spherex/lab-current-sha
+sudo cat /opt/docker/spherex/lab/CREDENTIALS.txt
+```
+
+Para copiar os dados do lab para o produto (hardlinks preservados):
+
+```sh
+sudo rsync -aH /opt/docker/spherex/lab/exports/ /caminho/de/destino/
 ```
 
 Para rollback administrativo, substitua `SHA_ANTERIOR` por um commit completo que ainda pertence à `main`:

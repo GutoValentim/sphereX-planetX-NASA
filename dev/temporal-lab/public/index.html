@@ -4,209 +4,173 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
-    <title>SPHEREx Temporal Lab</title>
+    <title>SPHEREx Lab</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="shell">
       <header class="hero">
-        <div>
-          <p class="eyebrow">NASA · SPHEREx · laboratório local</p>
+        <div class="hero-text">
+          <p class="eyebrow">NASA · SPHEREx · laboratório</p>
           <h1>Explorador temporal</h1>
           <p class="intro">
-            Descubra as épocas disponíveis para uma coordenada, veja o primeiro
-            frame assim que ele ficar pronto e acompanhe o restante em segundo plano.
+            Mapeie alvos conhecidos, guarde FITS, imagens renderizadas e espectros de cada versão
+            do motor e exporte tudo pronto para o produto.
           </p>
         </div>
-        <div class="status-pill" id="serviceStatus">Verificando serviço…</div>
+        <div class="hero-side">
+          <div class="status-row">
+            <div class="status-pill" id="diskStatus" hidden></div>
+            <div class="status-pill" id="serviceStatus">Verificando serviço…</div>
+          </div>
+          <label class="engine-picker">
+            <span>Motor</span>
+            <select id="engineSelect" aria-label="Versão do motor"></select>
+          </label>
+        </div>
       </header>
 
+      <div class="engine-banner" id="engineBanner" hidden></div>
+
       <nav class="view-tabs" role="tablist" aria-label="Áreas do laboratório">
-        <button
-          class="tab-button active"
-          id="exploreTabButton"
-          type="button"
-          role="tab"
-          aria-selected="true"
-          aria-controls="exploreTab"
-        >
-          Explorar
+        <button class="tab-button active" id="exploreTabButton" type="button" role="tab" aria-selected="true" aria-controls="exploreTab">Explorar</button>
+        <button class="tab-button" id="historyTabButton" type="button" role="tab" aria-selected="false" aria-controls="historyTab">
+          Registros <span class="history-count" id="historyCountBadge">0</span>
         </button>
-        <button
-          class="tab-button"
-          id="historyTabButton"
-          type="button"
-          role="tab"
-          aria-selected="false"
-          aria-controls="historyTab"
-        >
-          Histórico <span class="history-count" id="historyCountBadge">0</span>
-        </button>
-        <button
-          class="tab-button"
-          id="settingsTabButton"
-          type="button"
-          role="tab"
-          aria-selected="false"
-          aria-controls="settingsTab"
-        >
-          Configurações
-        </button>
+        <button class="tab-button" id="enginesTabButton" type="button" role="tab" aria-selected="false" aria-controls="enginesTab">Versões do motor</button>
+        <button class="tab-button" id="settingsTabButton" type="button" role="tab" aria-selected="false" aria-controls="settingsTab">Configurações</button>
       </nav>
 
       <div id="exploreTab" role="tabpanel" aria-labelledby="exploreTabButton">
-        <section class="search-panel" aria-labelledby="search-title">
-        <div class="section-heading">
-          <div>
-            <p class="section-kicker">Entrada</p>
-            <h2 id="search-title">Coordenadas ICRS</h2>
-          </div>
-          <p class="fixed-config" id="fixedConfig">recorte 45′ → janela 30′ · 293 px · máximo 100 frames</p>
-        </div>
-
-        <form id="searchForm">
-          <label>
-            <span>Ascensão reta · RA</span>
-            <input id="raInput" name="ra" type="number" step="any" min="0" max="359.999999" value="133.795129167" required />
-          </label>
-          <label>
-            <span>Declinação · Dec</span>
-            <input id="decInput" name="dec" type="number" step="any" min="-90" max="90" value="-7.245147222" required />
-          </label>
-          <fieldset class="band-selector">
-            <legend>Bandas espectrais</legend>
-            <div class="band-options" id="bandOptions">
-              <label><input type="checkbox" name="bandpass" value="SPHEREx-D1" checked /><span>D1</span><small>0,744–1,116 µm</small></label>
-              <label><input type="checkbox" name="bandpass" value="SPHEREx-D2" /><span>D2</span><small>1,099–1,651 µm</small></label>
-              <label><input type="checkbox" name="bandpass" value="SPHEREx-D3" checked /><span>D3</span><small>1,636–2,421 µm</small></label>
-              <label><input type="checkbox" name="bandpass" value="SPHEREx-D4" /><span>D4</span><small>2,423–3,822 µm</small></label>
-              <label><input type="checkbox" name="bandpass" value="SPHEREx-D5" /><span>D5</span><small>3,809–4,420 µm</small></label>
-              <label><input type="checkbox" name="bandpass" value="SPHEREx-D6" /><span>D6</span><small>4,412–5,002 µm</small></label>
+        <section class="panel search-panel" aria-labelledby="search-title">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Entrada</p>
+              <h2 id="search-title">Alvo e coordenadas ICRS</h2>
             </div>
-            <div class="band-actions">
-              <button type="button" id="selectAllBands">Selecionar todas</button>
-              <button type="button" id="clearBands">Limpar</button>
-            </div>
-          </fieldset>
-          <label>
-            <span>Resultado</span>
-            <select id="outputInput" name="output">
-              <option value="image" selected>Imagem · sequência temporal</option>
-              <option value="spectrum">Espectro · todas as observações</option>
-            </select>
-          </label>
-          <label>
-            <span>Estratégia temporal</span>
-            <select id="modeInput" name="mode">
-              <option value="fast" selected>Rápida · melhor bloco de até 4</option>
-              <option value="balanced">Balanceada · até 12 épocas</option>
-              <option value="full">Completa · todas as épocas</option>
-            </select>
-          </label>
-          <button class="primary-button" id="searchButton" type="submit">
-            Buscar sequência
-          </button>
-        </form>
+            <p class="fixed-config" id="fixedConfig">recorte 45′ → janela 30′ · 293 px · máximo 100 frames</p>
+          </div>
 
-        <div class="timing-grid" aria-live="polite">
-          <div>
-            <span>Tempo total</span>
-            <strong id="totalTimer">0,0 s</strong>
+          <form id="searchForm" class="search-form" novalidate>
+            <label class="field field-name">
+              <span>Nome do alvo</span>
+              <input id="nameInput" type="text" maxlength="160" placeholder="ex.: Nebulosa de Órion (M42)" autocomplete="off" />
+            </label>
+            <label class="field field-description">
+              <span>Descrição <small>(opcional, vai para o produto)</small></span>
+              <input id="descriptionInput" type="text" maxlength="4000" placeholder="ex.: Berçário estelar a ~1.344 anos-luz, em Órion" autocomplete="off" />
+            </label>
+            <label class="field field-ra">
+              <span>Ascensão reta · RA</span>
+              <input id="raInput" type="text" inputmode="decimal" value="133.795129167" required autocomplete="off" spellcheck="false" />
+              <small class="coord-hint" id="raHint">graus (133.79) ou horas (08h55m10.8s · 08 55 10.8)</small>
+            </label>
+            <label class="field field-dec">
+              <span>Declinação · Dec</span>
+              <input id="decInput" type="text" inputmode="decimal" value="-7.245147222" required autocomplete="off" spellcheck="false" />
+              <small class="coord-hint" id="decHint">graus (−7.245) ou −07°14′42″ · −07 14 42</small>
+            </label>
+            <label class="field field-output">
+              <span>Resultado</span>
+              <select id="outputInput" name="output">
+                <option value="image" selected>Imagem · sequência temporal</option>
+                <option value="spectrum">Espectro · todas as observações</option>
+              </select>
+            </label>
+            <label class="field field-mode">
+              <span>Estratégia temporal</span>
+              <select id="modeInput" name="mode">
+                <option value="fast" selected>Rápida · bloco de até 4</option>
+                <option value="balanced">Balanceada · até 12 épocas</option>
+                <option value="full">Completa · todas as épocas</option>
+              </select>
+            </label>
+            <fieldset class="band-selector field-bands">
+              <legend>Bandas espectrais</legend>
+              <div class="band-options" id="bandOptions">
+                <label><input type="checkbox" name="bandpass" value="SPHEREx-D1" checked /><span>D1</span><small>0,744–1,116 µm</small></label>
+                <label><input type="checkbox" name="bandpass" value="SPHEREx-D2" /><span>D2</span><small>1,099–1,651 µm</small></label>
+                <label><input type="checkbox" name="bandpass" value="SPHEREx-D3" checked /><span>D3</span><small>1,636–2,421 µm</small></label>
+                <label><input type="checkbox" name="bandpass" value="SPHEREx-D4" /><span>D4</span><small>2,423–3,822 µm</small></label>
+                <label><input type="checkbox" name="bandpass" value="SPHEREx-D5" /><span>D5</span><small>3,809–4,420 µm</small></label>
+                <label><input type="checkbox" name="bandpass" value="SPHEREx-D6" /><span>D6</span><small>4,412–5,002 µm</small></label>
+              </div>
+              <div class="band-actions">
+                <button type="button" id="selectAllBands">Selecionar todas</button>
+                <button type="button" id="clearBands">Limpar seleção</button>
+              </div>
+            </fieldset>
+            <div class="form-actions field-actions">
+              <button class="primary-button" id="searchButton" type="submit">Buscar sequência</button>
+              <button class="ghost-button" id="mapCurrentButton" type="button" title="Salva o registro e coloca o mapeamento completo na fila do servidor">Mapear tudo…</button>
+            </div>
+          </form>
+
+          <div class="timing-grid" aria-live="polite">
+            <div><span>Tempo total</span><strong id="totalTimer">0,0 s</strong></div>
+            <div><span>Descoberta</span><strong id="discoveryTimer">—</strong></div>
+            <div><span>Frame atual</span><strong id="frameTimer">—</strong></div>
+            <div><span>Origem</span><strong id="cacheStatus">—</strong></div>
+            <div><span>Pré-carregamento</span><strong id="prefetchProgress">—</strong></div>
           </div>
-          <div>
-            <span>Descoberta</span>
-            <strong id="discoveryTimer">—</strong>
-          </div>
-          <div>
-            <span>Frame atual</span>
-            <strong id="frameTimer">—</strong>
-          </div>
-          <div>
-            <span>Origem</span>
-            <strong id="cacheStatus">—</strong>
-          </div>
-          <div>
-            <span>Pré-carregamento</span>
-            <strong id="prefetchProgress">—</strong>
-          </div>
-        </div>
-        <p class="message" id="message" role="status">Pronto para consultar.</p>
+          <p class="message" id="message" role="status">Pronto para consultar.</p>
         </section>
 
-        <section class="viewer-panel" id="viewerPanel" aria-labelledby="viewer-title" hidden>
-        <div class="section-heading viewer-heading">
-          <div>
-            <p class="section-kicker">Sequência</p>
-            <h2 id="viewer-title">Frame <span id="frameCounter">1 / 1</span></h2>
+        <section class="panel viewer-panel" id="viewerPanel" aria-labelledby="viewer-title" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Sequência</p>
+              <h2 id="viewer-title">Composição <span id="frameCounter">1 / 1</span></h2>
+            </div>
+            <button class="ghost-button danger" id="clearDatasetButton" type="button">Apagar cache desta composição…</button>
           </div>
-          <div class="viewer-actions">
-            <button class="ghost-button danger" id="clearDatasetButton" type="button">Limpar este cache</button>
-            <button class="ghost-button" id="clearAllButton" type="button">Limpar tudo</button>
-          </div>
-        </div>
 
-        <div class="render-toolbar">
-          <div class="render-group">
-            <span class="render-label" id="profileLabel">Renderização</span>
-            <div class="segmented" id="profileButtons" role="radiogroup" aria-labelledby="profileLabel"></div>
-          </div>
-          <div class="render-group">
-            <span class="render-label" id="colorModeLabel">Cor</span>
-            <div class="segmented" id="colorModeButtons" role="radiogroup" aria-labelledby="colorModeLabel">
-              <button type="button" role="radio" data-color-mode="color" aria-checked="true">Falsa cor</button>
-              <button type="button" role="radio" data-color-mode="mono" aria-checked="false">Monocromático</button>
+          <div class="render-toolbar">
+            <div class="render-group">
+              <span class="render-label" id="profileLabel">Renderização</span>
+              <div class="segmented" id="profileButtons" role="radiogroup" aria-labelledby="profileLabel"></div>
+            </div>
+            <div class="render-group">
+              <span class="render-label" id="colorModeLabel">Cor</span>
+              <div class="segmented" id="colorModeButtons" role="radiogroup" aria-labelledby="colorModeLabel">
+                <button type="button" role="radio" data-color-mode="color" aria-checked="true">Falsa cor</button>
+                <button type="button" role="radio" data-color-mode="mono" aria-checked="false">Monocromático</button>
+              </div>
             </div>
           </div>
-        </div>
-        <p class="render-hint" id="profileHint">—</p>
+          <p class="render-hint" id="profileHint">—</p>
 
-        <div class="image-stage">
-          <div class="frame-layers" id="frameLayers" aria-label="Composição multibanda SPHEREx"></div>
-          <div class="loading-overlay" id="loadingOverlay" hidden>
-            <span class="spinner" aria-hidden="true"></span>
-            <strong id="loadingTitle">Carregando primeira imagem…</strong>
-            <small>Todos os FITS da sequência serão preparados em segundo plano.</small>
+          <div class="image-stage">
+            <div class="frame-layers" id="frameLayers" aria-label="Composição multibanda SPHEREx"></div>
+            <div class="loading-overlay" id="loadingOverlay" hidden>
+              <span class="spinner" aria-hidden="true"></span>
+              <strong id="loadingTitle">Carregando primeira imagem…</strong>
+              <small>Os FITS da sequência são preparados em segundo plano.</small>
+            </div>
           </div>
-        </div>
 
-        <div class="layer-legend" id="layerLegend" aria-label="Camadas da composição"></div>
+          <div class="layer-legend" id="layerLegend" aria-label="Camadas da composição"></div>
 
-        <div class="frame-metadata">
-          <div>
-            <span>Observação</span>
-            <strong id="observationId">—</strong>
+          <div class="frame-metadata">
+            <div><span>Observação</span><strong id="observationId">—</strong></div>
+            <div><span>Data UTC</span><strong id="observedAt">—</strong></div>
+            <div><span>Intervalo anterior</span><strong id="frameGap">—</strong></div>
+            <div><span>Frames / alinhamento</span><strong id="availableCount">—</strong></div>
+            <div>
+              <span>Cor e renderização</span>
+              <strong class="spectral-value"><i class="color-swatch" id="colorSwatch" aria-hidden="true"></i><span id="spectralInfo">—</span></strong>
+            </div>
           </div>
-          <div>
-            <span>Data UTC</span>
-            <strong id="observedAt">—</strong>
-          </div>
-          <div>
-            <span>Intervalo anterior</span>
-            <strong id="frameGap">—</strong>
-          </div>
-          <div>
-            <span>Frames / alinhamento</span>
-            <strong id="availableCount">—</strong>
-          </div>
-          <div>
-            <span>Cor e renderização</span>
-            <strong class="spectral-value">
-              <i class="color-swatch" id="colorSwatch" aria-hidden="true"></i>
-              <span id="spectralInfo">—</span>
-            </strong>
-          </div>
-        </div>
 
-        <div class="timeline-controls">
-          <button class="step-button" id="previousButton" type="button" aria-label="Frame anterior">←</button>
-          <label for="frameSlider">Navegar pelas épocas</label>
-          <input id="frameSlider" type="range" min="0" max="0" value="0" step="1" />
-          <button class="step-button" id="nextButton" type="button" aria-label="Próximo frame">→</button>
-        </div>
-        <p class="slider-hint">Arraste livremente; frames ainda em processamento aparecem automaticamente assim que ficarem prontos.</p>
+          <div class="timeline-controls">
+            <button class="step-button" id="previousButton" type="button" aria-label="Composição anterior">←</button>
+            <input id="frameSlider" type="range" min="0" max="0" value="0" step="1" aria-label="Navegar pelas épocas" />
+            <button class="step-button" id="nextButton" type="button" aria-label="Próxima composição">→</button>
+          </div>
+          <p class="slider-hint">Arraste livremente; épocas ainda em processamento aparecem assim que ficam prontas.</p>
         </section>
 
-        <section class="spectrum-panel" id="spectrumPanel" aria-labelledby="spectrum-title" hidden>
+        <section class="panel spectrum-panel" id="spectrumPanel" aria-labelledby="spectrum-title" hidden>
           <div class="section-heading">
             <div>
               <p class="section-kicker">Espectro</p>
@@ -227,13 +191,59 @@
         </section>
       </div>
 
-      <section
-        class="settings-panel"
-        id="settingsTab"
-        role="tabpanel"
-        aria-labelledby="settingsTabButton"
-        hidden
-      >
+      <section class="panel history-panel" id="historyTab" role="tabpanel" aria-labelledby="historyTabButton" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Acervo compartilhado</p>
+            <h2>Registros mapeados</h2>
+          </div>
+          <a class="ghost-button link-button" id="exportIndexLink" href="#" target="_blank" rel="noopener">Índice de exportação</a>
+        </div>
+        <p class="history-description" id="historyDescription">
+          Cobertura no motor selecionado: FITS baixados e imagens renderizadas em todas as variantes, por FOV e banda, e o espectro de cada banda.
+        </p>
+        <div class="history-toolbar">
+          <input id="historySearch" type="search" placeholder="Filtrar por nome, descrição ou coordenada" aria-label="Filtrar registros" />
+          <div class="segmented" id="historyFilter" role="radiogroup" aria-label="Filtrar por estado">
+            <button type="button" role="radio" data-filter="all" aria-checked="true">Todos</button>
+            <button type="button" role="radio" data-filter="complete" aria-checked="false">100%</button>
+            <button type="button" role="radio" data-filter="partial" aria-checked="false">Parciais</button>
+            <button type="button" role="radio" data-filter="error" aria-checked="false">Com erro</button>
+            <button type="button" role="radio" data-filter="active" aria-checked="false">Na fila</button>
+          </div>
+        </div>
+        <p class="queue-line" id="queueLine" hidden></p>
+        <div class="history-list" id="historyList"></div>
+        <div class="history-empty" id="historyEmpty">
+          <strong>Nenhum registro ainda.</strong>
+          <span>Busque uma coordenada na aba Explorar ou use “Mapear tudo”.</span>
+        </div>
+      </section>
+
+      <section class="panel engines-panel" id="enginesTab" role="tabpanel" aria-labelledby="enginesTabButton" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Versionamento</p>
+            <h2>Versões do motor</h2>
+          </div>
+        </div>
+        <p class="history-description">
+          Cada versão congela o código do backend científico e tem cache próprio. Registros feitos com uma
+          versão continuam intactos quando o código muda; escolha no seletor “Motor” qual versão usar.
+        </p>
+        <form class="engine-create" id="engineCreateForm" hidden>
+          <strong id="engineCreateTitle">Código novo nesta release</strong>
+          <p id="engineCreateText"></p>
+          <div class="engine-create-fields">
+            <label class="field"><span>Título</span><input id="engineTitleInput" type="text" maxlength="120" placeholder="ex.: Espectro com menos pontos" required /></label>
+            <label class="field"><span>Descrição</span><input id="engineDescriptionInput" type="text" maxlength="2000" placeholder="O que muda nesta versão e o que testar" /></label>
+            <button class="primary-button" type="submit">Congelar como nova versão</button>
+          </div>
+        </form>
+        <div class="engine-list" id="engineList"></div>
+      </section>
+
+      <section class="panel settings-panel" id="settingsTab" role="tabpanel" aria-labelledby="settingsTabButton" hidden>
         <div class="section-heading">
           <div>
             <p class="section-kicker">Recorte e resolução</p>
@@ -245,8 +255,7 @@
         <fieldset class="settings-group">
           <legend>Campo de visão (janela final)</legend>
           <p class="settings-help">
-            O recorte baixado do IRSA é sempre 1,5× a janela, para que a reprojeção e a
-            correção de deslocamento nunca deixem cantos sem dados.
+            O recorte baixado do IRSA é sempre 1,5× a janela, para que a reprojeção nunca deixe cantos sem dados.
           </p>
           <div class="option-cards" id="fovOptions"></div>
         </fieldset>
@@ -266,34 +275,49 @@
           </p>
         </div>
       </section>
-
-      <section
-        class="history-panel"
-        id="historyTab"
-        role="tabpanel"
-        aria-labelledby="historyTabButton"
-        hidden
-      >
-        <div class="section-heading">
-          <div>
-            <p class="section-kicker">Consultas recentes</p>
-            <h2>Histórico de coordenadas</h2>
-          </div>
-          <button class="ghost-button danger" id="clearHistoryButton" type="button">
-            Limpar histórico
-          </button>
-        </div>
-        <p class="history-description">
-          As coordenadas ficam salvas neste navegador, mesmo quando o cache científico é apagado.
-        </p>
-        <div class="history-list" id="historyList"></div>
-        <div class="history-empty" id="historyEmpty">
-          <strong>Nenhuma coordenada consultada ainda.</strong>
-          <span>Faça uma busca na aba Explorar para criar o primeiro item.</span>
-        </div>
-      </section>
     </main>
 
+    <dialog class="modal" id="confirmDialog" aria-labelledby="confirmTitle">
+      <form method="dialog" class="modal-body">
+        <h2 id="confirmTitle">Confirmar</h2>
+        <div id="confirmText"></div>
+        <label class="check-row" id="confirmOptionRow" hidden>
+          <input type="checkbox" id="confirmOption" />
+          <span id="confirmOptionText"></span>
+        </label>
+        <div class="modal-actions">
+          <button class="ghost-button" value="cancel" type="submit">Cancelar</button>
+          <button class="primary-button danger-fill" value="confirm" id="confirmButton" type="submit">Apagar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="mapDialog" aria-labelledby="mapTitle">
+      <form method="dialog" class="modal-body" id="mapForm">
+        <h2 id="mapTitle">Mapear alvo</h2>
+        <p class="modal-lead" id="mapLead"></p>
+        <fieldset class="modal-group">
+          <legend>Imagens · FOVs</legend>
+          <div class="chip-options" id="mapFovOptions"></div>
+        </fieldset>
+        <fieldset class="modal-group">
+          <legend>Amostragem</legend>
+          <div class="chip-options" id="mapSamplingOptions"></div>
+        </fieldset>
+        <fieldset class="modal-group">
+          <legend>Bandas</legend>
+          <div class="chip-options" id="mapBandOptions"></div>
+        </fieldset>
+        <label class="check-row"><input type="checkbox" id="mapSpectrum" checked /><span>Espectro de todas as observações (temas escuro e claro)</span></label>
+        <p class="modal-note" id="mapNote"></p>
+        <div class="modal-actions">
+          <button class="ghost-button" value="cancel" type="submit">Cancelar</button>
+          <button class="primary-button" value="confirm" type="submit">Adicionar à fila</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="./coords.js" defer></script>
     <script src="./app.js" defer></script>
   </body>
 </html>

@@ -5,11 +5,11 @@ base=/opt/docker/spherex
 repo=https://github.com/GutoValentim/sphereX-planetX-NASA.git
 node_image=node:24-bookworm-slim
 python_image=python:3.12-slim-bookworm
-components=(api frontend python)
+components=(api frontend python lab)
 sha=${1:-}
 scope=${2:-stack}
-[[ $# -ge 1 && $# -le 2 && $sha =~ ^[0-9a-f]{40}$ && $scope =~ ^(api|frontend|python|stack)$ ]] || {
-  echo "Usage: spherex-deploy <commit SHA> [api|frontend|python|stack]" >&2
+[[ $# -ge 1 && $# -le 2 && $sha =~ ^[0-9a-f]{40}$ && $scope =~ ^(api|frontend|python|lab|stack)$ ]] || {
+  echo "Usage: spherex-deploy <commit SHA> [api|frontend|python|lab|stack]" >&2
   exit 2
 }
 [[ $EUID == 0 ]] || { echo "Run as root." >&2; exit 2; }
@@ -31,7 +31,11 @@ if [[ $sha != "$latest" && ${SPHEREX_ALLOW_ROLLBACK:-0} != 1 ]]; then
     # Mesma classificação usada pelo job "changes" do CI.
     case "$file" in
       backend/*.py|backend/requirements*.txt)
-        if [[ $scope == python || $scope == stack ]]; then superseded=true; fi
+        # O laboratório congela o código Python do backend em cada versão do motor.
+        if [[ $scope == python || $scope == lab || $scope == stack ]]; then superseded=true; fi
+        ;;
+      dev/temporal-lab/*)
+        if [[ $scope == lab || $scope == stack ]]; then superseded=true; fi
         ;;
       backend/*)
         if [[ $scope == api || $scope == stack ]]; then superseded=true; fi
@@ -43,7 +47,7 @@ if [[ $sha != "$latest" && ${SPHEREX_ALLOW_ROLLBACK:-0} != 1 ]]; then
         superseded=true
         ;;
       package.json|package-lock.json|eslint.config.mjs)
-        if [[ $scope != python ]]; then superseded=true; fi
+        if [[ $scope != python && $scope != lab ]]; then superseded=true; fi
         ;;
     esac
   done <<< "$changed_files"
@@ -55,12 +59,14 @@ fi
 
 frontend_domain=spherex.prospectordigital.com.br
 api_domain=api.spherex.prospectordigital.com.br
+lab_domain=lab.spherex.prospectordigital.com.br
 if [[ -f $base/.env ]]; then
   set -a
   source "$base/.env"
   set +a
   frontend_domain=${FRONTEND_DOMAIN:-$frontend_domain}
   api_domain=${API_DOMAIN:-$api_domain}
+  lab_domain=${LAB_DOMAIN:-$lab_domain}
 fi
 
 build_release() {
@@ -78,7 +84,12 @@ build_release() {
     return 1
   fi
   local built=0
-  if [[ $component == python ]]; then
+  local python_release="$base/releases/python/$sha"
+  if [[ $component == lab && -f $python_release/.build-complete ]]; then
+    # Mesmo commit e mesmas dependências do serviço Python: reaproveita a release
+    # (o venv usa o caminho /app, o mesmo em que o laboratório é montado).
+    cp -a "$python_release/." "$staging/" && rm -f "$staging/.build-complete" && built=1
+  elif [[ $component == python || $component == lab ]]; then
     # O venv é criado em /app, o mesmo caminho em que a release é montada em produção.
     docker run --rm --name "spherex-build-$component-${sha:0:12}" \
       --memory 2g --cpus 1 --pids-limit 256 \
@@ -136,6 +147,10 @@ chmod 600 "$base/api.env"
 mkdir -p "$base/cache"
 chown 1000:1000 "$base/cache"
 chmod 750 "$base/cache"
+# Acervo do laboratório: motores congelados, registros, caches por versão e exportações.
+mkdir -p "$base/lab"
+chown 1000:1000 "$base/lab"
+chmod 750 "$base/lab"
 
 resolve_release_link() {
   local release=
@@ -155,7 +170,8 @@ previous_sha() { local name="previous_sha_$1"; printf '%s' "${!name}"; }
 legacy_release=$(resolve_release_link "$base/current")
 for component in "${components[@]}"; do
   release=$(resolve_release_link "$base/current-$component")
-  if [[ $component != python && -z $release ]]; then
+  # A release única legada só existiu para os serviços Node.
+  if [[ ($component == api || $component == frontend) && -z $release ]]; then
     release=$legacy_release
   fi
   release_sha=
@@ -230,9 +246,11 @@ verify_release() {
     sleep 2
   done
   [[ $healthy == 1 ]] || return 1
-  if [[ $service == python ]]; then
-    docker exec -e "EXPECTED_GIT_SHA=$expected_sha" "$id" /app/.venv/bin/python -c \
-      'import json,os,urllib.request; r=json.load(urllib.request.urlopen("http://127.0.0.1:8000/healthz", timeout=5)); raise SystemExit(r.get("version") != os.environ["EXPECTED_GIT_SHA"])'
+  if [[ $service == python || $service == lab ]]; then
+    local health_url=http://127.0.0.1:8000/healthz
+    [[ $service == lab ]] && health_url='http://127.0.0.1:8765/api/health?light=1'
+    docker exec -e "EXPECTED_GIT_SHA=$expected_sha" -e "HEALTH_URL=$health_url" "$id" /app/.venv/bin/python -c \
+      'import json,os,urllib.request; r=json.load(urllib.request.urlopen(os.environ["HEALTH_URL"], timeout=5)); raise SystemExit(r.get("version") != os.environ["EXPECTED_GIT_SHA"])'
   else
     docker exec -e "EXPECTED_GIT_SHA=$expected_sha" "$id" node \
       --env-file=/app/.release.env \
@@ -302,7 +320,7 @@ if [[ $scope == stack ]]; then
     for component in "${components[@]}"; do
       printf 'SPHEREX_%s_RELEASE_DIR=%s/current-%s\n' "$(upper "$component")" "$base" "$component"
     done
-    printf 'FRONTEND_DOMAIN=%s\nAPI_DOMAIN=%s\n' "$frontend_domain" "$api_domain"
+    printf 'FRONTEND_DOMAIN=%s\nAPI_DOMAIN=%s\nLAB_DOMAIN=%s\n' "$frontend_domain" "$api_domain" "$lab_domain"
   } > "$base/.env.next"
   chmod 600 "$base/.env.next"
   mv "$base/.env.next" "$base/.env"
