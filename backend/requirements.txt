@@ -5,3 +5,4 @@ numpy>=2.0,<3
 Pillow>=12,<13
 pyvo>=1.7,<2
 requests>=2.32,<3
+reproject>=0.21,<0.22

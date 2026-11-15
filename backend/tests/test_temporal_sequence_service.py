@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from astropy.io import fits
+from astropy.wcs import WCS
 import numpy as np
 
 from app.schemas.observations import ObservationRecord
@@ -75,8 +76,15 @@ class TemporalSequenceServiceTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.source = self.root / "source.fits"
         primary = fits.PrimaryHDU()
+        source_wcs = WCS(naxis=2)
+        source_wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+        source_wcs.wcs.cunit = ["deg", "deg"]
+        source_wcs.wcs.crval = [TARGET_RA, TARGET_DEC]
+        source_wcs.wcs.crpix = [6, 6]
+        source_wcs.wcs.cdelt = [-0.05, 0.05]
         image = fits.ImageHDU(
-            data=np.arange(100, dtype=np.float32).reshape(10, 10),
+            data=np.arange(121, dtype=np.float32).reshape(11, 11),
+            header=source_wcs.to_header(),
             name="IMAGE",
         )
         image.header["BUNIT"] = "MJy / sr"
@@ -106,7 +114,7 @@ class TemporalSequenceServiceTests(unittest.TestCase):
         self.assertEqual(client.search_calls, 1)
         self.assertEqual(client.download_calls, 2)
         self.assertEqual(result.frame_count, 2)
-        self.assertFalse(result.aligned)
+        self.assertTrue(result.aligned)
         self.assertEqual(
             [frame.observation.observation_id for frame in result.frames],
             ["earlier", "later"],
@@ -177,6 +185,9 @@ class TemporalSequenceServiceTests(unittest.TestCase):
         )
 
         self.assertFalse(frame.cache_hit)
+        self.assertTrue(frame.frame.aligned)
+        self.assertEqual(frame.frame.center_ra_deg, TARGET_RA)
+        self.assertEqual(frame.frame.center_dec_deg, TARGET_DEC)
         self.assertTrue(cached_frame.cache_hit)
         self.assertEqual(client.download_calls, 1)
         self.assertEqual(service.clear_cache(cache, dataset.request_id), 1)

@@ -17,14 +17,22 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 
 from app.schemas.observations import ObservationQuery, ObservationRecord
-from app.services.frame_generator import GeneratedFrame, generate_frame
+from app.services.frame_generator import GeneratedFrame, generate_frame_from_array
+from app.services.image_aligner import (
+    AlignedImage,
+    CommonSkyGrid,
+    align_fits_image,
+    build_common_sky_grid,
+)
 from app.services.irsa_client import IrsaClient
 
 
 FIXED_SEQUENCE_FOV_ARCMIN = 30.0
+FIXED_SOURCE_CUTOUT_FOV_ARCMIN = 45.0
 DEFAULT_SEQUENCE_BANDPASS = "SPHEREx-D3"
 DEFAULT_MAX_SEQUENCE_FRAMES = 100
 DEFAULT_DOWNLOAD_WORKERS = 8
+FRAME_CACHE_VERSION = 2
 SEQUENCE_MODES = frozenset({"fast", "balanced", "full"})
 _SAFE_IDENTIFIER = re.compile(r"[^A-Za-z0-9._-]+")
 _SAFE_REQUEST_ID = re.compile(r"[0-9a-f]{16}")
@@ -64,6 +72,7 @@ class TemporalSequenceResult:
     ra_deg: float
     dec_deg: float
     fov_arcmin: float
+    cutout_fov_arcmin: float
     bandpass: str
     collections: tuple[str, ...]
     source_observation_count: int
@@ -85,6 +94,7 @@ class TemporalDataset:
     ra_deg: float
     dec_deg: float
     fov_arcmin: float
+    cutout_fov_arcmin: float
     bandpass: str
     collections: tuple[str, ...]
     source_observation_count: int
@@ -162,12 +172,17 @@ class SpherexTemporalSequenceService:
         irsa_client: IrsaClient | None = None,
         *,
         fov_arcmin: float = FIXED_SEQUENCE_FOV_ARCMIN,
+        cutout_fov_arcmin: float = FIXED_SOURCE_CUTOUT_FOV_ARCMIN,
         bandpass: str = DEFAULT_SEQUENCE_BANDPASS,
         max_frames: int = DEFAULT_MAX_SEQUENCE_FRAMES,
         download_workers: int = DEFAULT_DOWNLOAD_WORKERS,
     ) -> None:
         if not 0 < fov_arcmin <= 60:
             raise ValueError("fov_arcmin deve estar no intervalo (0, 60].")
+        if not fov_arcmin <= cutout_fov_arcmin <= 60:
+            raise ValueError(
+                "cutout_fov_arcmin deve ser maior ou igual ao FOV final e no máximo 60."
+            )
         if max_frames <= 0:
             raise ValueError("max_frames deve ser maior que zero.")
         if not 1 <= download_workers <= 8:
@@ -175,6 +190,7 @@ class SpherexTemporalSequenceService:
 
         self.irsa_client = irsa_client or IrsaClient()
         self.fov_arcmin = fov_arcmin
+        self.cutout_fov_arcmin = cutout_fov_arcmin
         self.bandpass = bandpass
         self.max_frames = max_frames
         self.download_workers = download_workers
@@ -199,6 +215,7 @@ class SpherexTemporalSequenceService:
             ra_deg=ra_deg,
             dec_deg=dec_deg,
             fov_arcmin=self.fov_arcmin,
+            cutout_fov_arcmin=self.cutout_fov_arcmin,
             bandpass=self.bandpass,
             collections=collections,
             start_time=start_time,
@@ -221,6 +238,7 @@ class SpherexTemporalSequenceService:
             ra_deg=ra_deg,
             dec_deg=dec_deg,
             fov_arcmin=self.fov_arcmin,
+            cutout_fov_arcmin=self.cutout_fov_arcmin,
             bandpass=self.bandpass,
             collections=collections,
             source_observation_count=len(observations),
@@ -291,15 +309,34 @@ class SpherexTemporalSequenceService:
                 observation,
                 fits_directory,
                 cutout_center=(dataset.ra_deg, dataset.dec_deg),
-                cutout_size_deg=dataset.fov_arcmin / 60,
+                cutout_size_deg=dataset.cutout_fov_arcmin / 60,
                 overwrite=overwrite,
             )
             identifier = _SAFE_IDENTIFIER.sub("_", observation.observation_id)
             frame_path = frames_directory / f"{observation_index + 1:03d}_{identifier}.webp"
             with state_lock:
                 state = _read_frame_state(state_path)
+                if state["common_grid"] is None:
+                    grid = build_common_sky_grid(
+                        fits_path,
+                        center_ra_deg=dataset.ra_deg,
+                        center_dec_deg=dataset.dec_deg,
+                        fov_arcmin=dataset.fov_arcmin,
+                    )
+                    state["common_grid"] = grid.to_dict()
+                    _write_manifest(state_path, state)
+                else:
+                    grid = CommonSkyGrid.from_dict(state["common_grid"])
+
+            aligned_image = align_fits_image(fits_path, grid)
+            with state_lock:
+                state = _read_frame_state(state_path)
                 if state["display_min"] is None or state["display_max"] is None:
-                    generated = generate_frame(fits_path, frame_path)
+                    generated = _generate_aligned_frame(
+                        aligned_image,
+                        frame_path,
+                        grid,
+                    )
                     state["display_min"] = generated.display_min
                     state["display_max"] = generated.display_max
                     result = LazyFrameResult(
@@ -317,9 +354,10 @@ class SpherexTemporalSequenceService:
                 display_min = float(state["display_min"])
                 display_max = float(state["display_max"])
 
-            generated = generate_frame(
-                fits_path,
+            generated = _generate_aligned_frame(
+                aligned_image,
                 frame_path,
+                grid,
                 display_min=display_min,
                 display_max=display_max,
             )
@@ -473,8 +511,8 @@ class SpherexTemporalSequenceService:
     ) -> TemporalSequenceResult:
         """Executa uma busca nova e devolve frames WebP em ordem cronológica.
 
-        Os frames preservam a grade WCS de cada FITS. Alinhamento e reprojeção
-        ficam para a próxima etapa do pipeline.
+        Cada FITS é reprojetado para uma grade TAN comum, centrada exatamente
+        nas coordenadas solicitadas e com norte para cima.
         """
 
         observations, band_observations, candidates = self._query_candidates(
@@ -489,6 +527,7 @@ class SpherexTemporalSequenceService:
             ra_deg=ra_deg,
             dec_deg=dec_deg,
             fov_arcmin=self.fov_arcmin,
+            cutout_fov_arcmin=self.cutout_fov_arcmin,
             bandpass=self.bandpass,
             collections=collections,
             start_time=start_time,
@@ -507,11 +546,18 @@ class SpherexTemporalSequenceService:
             center=(ra_deg, dec_deg),
             overwrite=overwrite,
         )
+        common_grid = build_common_sky_grid(
+            fits_paths[0],
+            center_ra_deg=ra_deg,
+            center_dec_deg=dec_deg,
+            fov_arcmin=self.fov_arcmin,
+        )
         frames = self._generate_frames(
             candidates,
             fits_paths=fits_paths,
             frames_directory=frames_directory,
             sequence_directory=sequence_directory,
+            common_grid=common_grid,
         )
 
         result = TemporalSequenceResult(
@@ -519,12 +565,13 @@ class SpherexTemporalSequenceService:
             ra_deg=ra_deg,
             dec_deg=dec_deg,
             fov_arcmin=self.fov_arcmin,
+            cutout_fov_arcmin=self.cutout_fov_arcmin,
             bandpass=self.bandpass,
             collections=collections,
             source_observation_count=len(observations),
             band_observation_count=len(band_observations),
             frame_count=len(frames),
-            aligned=False,
+            aligned=True,
             frames=tuple(frames),
             manifest_path=str(manifest_path),
         )
@@ -563,7 +610,7 @@ class SpherexTemporalSequenceService:
                 observation.spatial_region,
                 ra_deg=ra_deg,
                 dec_deg=dec_deg,
-                fov_arcmin=self.fov_arcmin,
+                fov_arcmin=self.cutout_fov_arcmin,
             )
         )
         candidates.sort(key=lambda item: item.observed_at or "")
@@ -588,7 +635,7 @@ class SpherexTemporalSequenceService:
                 observation,
                 fits_directory,
                 cutout_center=center,
-                cutout_size_deg=self.fov_arcmin / 60,
+                cutout_size_deg=self.cutout_fov_arcmin / 60,
                 overwrite=overwrite,
             )
 
@@ -603,6 +650,7 @@ class SpherexTemporalSequenceService:
         fits_paths: list[Path],
         frames_directory: Path,
         sequence_directory: Path,
+        common_grid: CommonSkyGrid,
     ) -> list[TemporalFrame]:
         frames: list[TemporalFrame] = []
         display_range: tuple[float, float] | None = None
@@ -613,13 +661,19 @@ class SpherexTemporalSequenceService:
         ):
             identifier = _SAFE_IDENTIFIER.sub("_", observation.observation_id)
             output_path = frames_directory / f"{index:03d}_{identifier}.webp"
+            aligned_image = align_fits_image(fits_path, common_grid)
             options: dict[str, float] = {}
             if display_range is not None:
                 options = {
                     "display_min": display_range[0],
                     "display_max": display_range[1],
                 }
-            generated = generate_frame(fits_path, output_path, **options)
+            generated = _generate_aligned_frame(
+                aligned_image,
+                output_path,
+                common_grid,
+                **options,
+            )
             if display_range is None:
                 display_range = (generated.display_min, generated.display_max)
 
@@ -699,6 +753,7 @@ def _request_id(
     ra_deg: float,
     dec_deg: float,
     fov_arcmin: float,
+    cutout_fov_arcmin: float,
     bandpass: str,
     collections: tuple[str, ...],
     start_time: datetime | None,
@@ -709,6 +764,7 @@ def _request_id(
             "ra_deg": round(ra_deg, 9),
             "dec_deg": round(dec_deg, 9),
             "fov_arcmin": fov_arcmin,
+            "cutout_fov_arcmin": cutout_fov_arcmin,
             "bandpass": bandpass,
             "collections": collections,
             "start_time": start_time.isoformat() if start_time else None,
@@ -729,6 +785,7 @@ def _load_dataset(path: Path, *, cache_hit: bool) -> TemporalDataset:
         ra_deg=float(data["ra_deg"]),
         dec_deg=float(data["dec_deg"]),
         fov_arcmin=float(data["fov_arcmin"]),
+        cutout_fov_arcmin=float(data.get("cutout_fov_arcmin", data["fov_arcmin"])),
         bandpass=data["bandpass"],
         collections=tuple(data["collections"]),
         source_observation_count=int(data["source_observation_count"]),
@@ -742,15 +799,46 @@ def _load_dataset(path: Path, *, cache_hit: bool) -> TemporalDataset:
 
 def _read_frame_state(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {
-            "display_min": None,
-            "display_max": None,
-            "frames": {},
-        }
+        return _empty_frame_state()
     data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("processing_version") != FRAME_CACHE_VERSION:
+        return _empty_frame_state()
     if not isinstance(data.get("frames"), dict):
         raise ValueError("Cache de frames inválido.")
+    if data.get("common_grid") is not None:
+        CommonSkyGrid.from_dict(data["common_grid"])
     return data
+
+
+def _empty_frame_state() -> dict[str, Any]:
+    return {
+        "processing_version": FRAME_CACHE_VERSION,
+        "display_min": None,
+        "display_max": None,
+        "common_grid": None,
+        "frames": {},
+    }
+
+
+def _generate_aligned_frame(
+    aligned_image: AlignedImage,
+    output_path: Path,
+    grid: CommonSkyGrid,
+    *,
+    display_min: float | None = None,
+    display_max: float | None = None,
+) -> GeneratedFrame:
+    return generate_frame_from_array(
+        aligned_image.data,
+        output_path,
+        source_unit=aligned_image.source_unit,
+        display_min=display_min,
+        display_max=display_max,
+        aligned=True,
+        center_ra_deg=grid.center_ra_deg,
+        center_dec_deg=grid.center_dec_deg,
+        coverage_fraction=aligned_image.coverage_fraction,
+    )
 
 
 def _lazy_frame_from_dict(data: dict[str, Any], *, cache_hit: bool) -> LazyFrameResult:
