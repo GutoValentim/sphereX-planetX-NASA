@@ -4,14 +4,29 @@
   gap: var(--space-5);
 }
 
+/*
+ * Three layouts (data-layout):
+ * - spherex: band panel | square image with the timeline right under it | mode toggle.
+ *   The square side follows the viewport height, so the image fills almost the whole screen.
+ * - reference: the DSS2 sky takes the band panel's column too (wide), no timeline.
+ * - chart: the spectrum spans the width and grows with its content (no inner scroll).
+ */
 .main {
+  /* Square side: the viewport height under the header, minus the page's top and bottom space. */
+  --viewer-side: max(20rem, calc(100dvh - var(--header-height) - 3.5rem));
+
   display: grid;
-  grid-template-columns: minmax(12rem, 15rem) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(17.5rem, 18.5rem) minmax(0, 1fr) auto;
   grid-template-areas:
     'bands stage mode'
-    '. timeline .';
-  gap: var(--space-4);
+    'bands timeline mode';
+  gap: var(--space-3) var(--space-5);
   align-items: start;
+}
+
+.main[data-layout='reference'],
+.main[data-layout='chart'] {
+  grid-template-areas: 'stage stage mode';
 }
 
 .bands {
@@ -22,17 +37,27 @@
 }
 
 .mode {
+  display: flex;
+  flex-direction: column;
   grid-area: mode;
+  gap: var(--space-2);
+  width: 5.5rem;
 }
 
 .timeline {
   grid-area: timeline;
+  justify-self: center;
+  width: min(100%, var(--viewer-side));
+}
+
+.bands[hidden],
+.timeline[hidden] {
+  display: none;
 }
 
 .stage {
   grid-area: stage;
   position: relative;
-  height: clamp(22rem, 62vh, 40rem);
   overflow: hidden;
   color: var(--color-on-viewer);
   background-color: var(--color-viewer-background);
@@ -40,44 +65,72 @@
   box-shadow: var(--shadow-md);
 }
 
+/* Square SPHEREx image: the stage is as wide as the viewport is tall (or narrower, if needed). */
+.main[data-layout='spherex'] .stage {
+  justify-self: center;
+  width: min(100%, var(--viewer-side));
+}
+
+.main[data-layout='reference'] .stage {
+  height: max(26rem, calc(100dvh - var(--header-height) - 3.5rem));
+}
+
+.main[data-layout='chart'] .stage {
+  color: var(--color-text-primary);
+  background-color: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+}
+
 .view {
   position: absolute;
   inset: 0;
+}
+
+.view:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * Wide frame (UI_FEATURES.viewerWideFrame): the SPHEREx image spans the column and is cropped
+ * top and bottom; its height leaves room for the timeline right below, inside the viewport.
+ */
+.main[data-layout='spherex'][data-frame='wide'] .stage,
+.main[data-layout='spherex'][data-frame='wide'] .timeline {
+  justify-self: stretch;
+  width: 100%;
+}
+
+.main[data-layout='spherex'][data-frame='wide'] .stage {
+  height: max(20rem, calc(100dvh - var(--header-height) - 15.5rem));
+}
+
+.main[data-layout='spherex'][data-frame='wide'] .view:not([hidden]) {
+  position: absolute;
+  inset: 0;
+}
+
+.main[data-layout='spherex'][data-frame='wide'] .sourceView:not([hidden]) {
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+/* The visible view sizes the stage in the square and chart layouts. */
+.main[data-layout='spherex'] .view:not([hidden]),
+.main[data-layout='chart'] .view:not([hidden]) {
+  position: relative;
+  inset: auto;
+}
+
+.main[data-layout='spherex'] .sourceView:not([hidden]) {
+  width: 100%;
+  aspect-ratio: 1;
 }
 
 /* visibility (not display: none) keeps the hidden view sized, so the map and chart keep a valid layout. */
 .view[hidden] {
   display: block;
   visibility: hidden;
-}
-
-.view:not([hidden]):has(.sourceToggle) {
-  display: flex;
-  flex-direction: column;
-}
-
-.sourceToggle {
-  display: flex;
-  flex-shrink: 0;
-  gap: var(--space-1, 0.25rem);
-  padding: var(--space-2);
-  border-bottom: 1px solid rgb(255 255 255 / 0.12);
-}
-
-.sourceToggle button {
-  padding: 0.3rem 0.75rem;
-  font: inherit;
-  font-size: 0.8rem;
-  color: inherit;
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid rgb(255 255 255 / 0.2);
-  border-radius: 999px;
-}
-
-.sourceToggle button[aria-pressed='true'] {
-  color: #000;
-  background: rgb(255 255 255 / 0.9);
 }
 
 .sourceView {
@@ -99,7 +152,9 @@
 }
 
 @media (max-width: 56rem) {
-  .main {
+  .main,
+  .main[data-layout='reference'],
+  .main[data-layout='chart'] {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
       'mode'
@@ -108,8 +163,28 @@
       'bands';
   }
 
-  .stage {
-    height: clamp(18rem, 55vh, 28rem);
+  .main[data-layout='spherex'] .stage,
+  .timeline {
+    width: 100%;
+  }
+
+  .mode {
+    flex-flow: row wrap;
+    width: 100%;
+  }
+
+  .mode > * {
+    flex: 1 1 9.5rem;
+  }
+
+  .main[data-layout='reference'] .stage {
+    height: clamp(18rem, 60vh, 28rem);
+  }
+
+  /* On narrow screens a "wide" frame would be portrait: keep the image square. */
+  .main[data-layout='spherex'][data-frame='wide'] .stage {
+    height: auto;
+    aspect-ratio: 1;
   }
 }
 

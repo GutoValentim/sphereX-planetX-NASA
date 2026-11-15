@@ -27,6 +27,8 @@ export const UI_FEATURES = {
   exploreTargetsList: true,
   /** Search / sky map / image pages: switch between "Search coordinates" and "Sky map" (ExploreModeSwitch). */
   exploreModeSwitch: true,
+  /** Image page: SPHEREx image in a wide frame (cropped top and bottom), timeline right below (ObservationWorkspace data-frame). */
+  viewerWideFrame: true,
   /** Image page: spectrum as rendered charts, combined + one per band, like the lab (SpectrumGallery). */
   spectrumGallery: true,
 } as const;

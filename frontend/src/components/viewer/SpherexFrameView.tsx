@@ -1,5 +1,5 @@
-import ErrorState from '../common/ErrorState';
-import LoadingState from '../common/LoadingState';
+import ArchiveUnavailable from './ArchiveUnavailable';
+import LoadProgress from './LoadProgress';
 import type { ObservationFrame, ObservationLoadStatus, SpectralBandId } from '../../types/observation';
 import styles from './SpherexFrameView.module.css';
 
@@ -8,88 +8,82 @@ interface SpherexFrameViewProps {
   selectedBandIds: readonly SpectralBandId[];
   status: ObservationLoadStatus;
   error?: string | null;
+  /** Rendered layers / total layers of a live job. */
   progress?: { done: number; total: number };
-}
-
-function formatOffset(seconds: number): string {
-  if (seconds === 0) return 'same epoch';
-  const sign = seconds > 0 ? '+' : '−';
-  const absolute = Math.abs(seconds);
-  if (absolute < 3600) return `${sign}${(absolute / 60).toFixed(0)} min`;
-  if (absolute < 86400) return `${sign}${(absolute / 3600).toFixed(1)} h`;
-  return `${sign}${(absolute / 86400).toFixed(1)} d`;
+  onRetry?: () => void;
+  /** "cover" fills a wide frame, cropping the top and bottom of the square images. */
+  fit?: 'contain' | 'cover';
 }
 
 /**
  * SPHEREx images of the active epoch: one aligned false-color layer per selected band, blended
- * additively (screen) over black, north up and the target at the center.
+ * additively (screen) over black, north up and the target at the center. The band legend lives in
+ * the band panel; live jobs show their real progress here.
  */
-function SpherexFrameView({ frame, selectedBandIds, status, error, progress }: SpherexFrameViewProps) {
-  if (!frame) {
-    if (status === 'error') {
-      return (
-        <div className={styles.center}>
-          <ErrorState title="SPHEREx data unavailable" message={error ?? 'The observations could not be loaded.'} />
-        </div>
-      );
-    }
+function SpherexFrameView({
+  frame,
+  selectedBandIds,
+  status,
+  error,
+  progress,
+  onRetry,
+  fit = 'contain',
+}: SpherexFrameViewProps) {
+  const done = progress?.done ?? 0;
+  const total = progress?.total ?? 0;
+
+  if (status === 'error' && (!frame || !frame.layers?.some((layer) => layer.imageUrl))) {
     return (
       <div className={styles.center}>
-        <LoadingState message="Searching the SPHEREx archive (NASA/IPAC IRSA)…" />
+        <ArchiveUnavailable detail={error} onRetry={onRetry} />
+      </div>
+    );
+  }
+
+  if (!frame) {
+    return (
+      <div className={styles.center}>
+        <LoadProgress
+          label="Searching the SPHEREx archive (NASA/IPAC IRSA)…"
+          detail="Finding every observation of this point. A new coordinate takes a minute or two."
+        />
       </div>
     );
   }
 
   const layers = (frame.layers ?? []).filter((layer) => selectedBandIds.includes(layer.bandId));
   const ready = layers.filter((layer) => layer.imageUrl);
-  const progressText = progress && progress.total ? ` (${progress.done}/${progress.total})` : '';
+  const rendering = status === 'rendering' && total > 0;
 
   return (
-    <div className={styles.view}>
-      <div className={styles.stage}>
-        {selectedBandIds.length === 0 ? (
-          <p className={styles.notice}>Select at least one band to display an image.</p>
-        ) : ready.length === 0 ? (
-          <div className={styles.center}>
-            <LoadingState message={`Aligning and rendering SPHEREx images${progressText}…`} />
-          </div>
-        ) : (
-          <div className={styles.layers}>
-            {ready.map((layer) => (
-              <img
-                key={layer.imageUrl}
-                className={styles.layer}
-                src={layer.imageUrl ?? undefined}
-                alt={`SPHEREx ${layer.bandId} image observed ${layer.observedAt}`}
-                draggable={false}
-              />
-            ))}
-            <span className={styles.reticle} aria-hidden="true" />
-          </div>
-        )}
-      </div>
-
-      <ul className={styles.legend} aria-label="Bands in this image">
-        {layers.map((layer) => {
-          const color = layer.color ? `rgb(${layer.color.join(',')})` : 'currentColor';
-          const range = layer.wavelengthRangeUm
-            ? ` · ${layer.wavelengthRangeUm[0].toFixed(2)}–${layer.wavelengthRangeUm[1].toFixed(2)} µm`
-            : '';
-          const state = layer.error ? ' · failed' : layer.imageUrl ? '' : ' · rendering';
-          return (
-            <li key={layer.bandId} className={layer.imageUrl ? styles.chip : `${styles.chip} ${styles.pending}`}>
-              <span className={styles.swatch} style={{ background: color }} aria-hidden="true" />
-              {layer.bandId}
-              {range} · {formatOffset(layer.deltaSeconds)}
-              {state}
-            </li>
-          );
-        })}
-      </ul>
-      <p className={styles.caption}>
-        SPHEREx (NASA/IPAC IRSA) · false color by wavelength · aligned, north up, target at the center
-        {status === 'rendering' && ` · rendering${progressText}`}
-      </p>
+    <div className={styles.stage} data-fit={fit}>
+      {selectedBandIds.length === 0 ? (
+        <p className={styles.notice}>Select at least one band to display an image.</p>
+      ) : ready.length === 0 ? (
+        <div className={styles.center}>
+          <LoadProgress
+            label="Aligning and rendering SPHEREx images…"
+            done={done}
+            total={total}
+            detail={total ? `${done} of ${total} band images ready` : undefined}
+          />
+        </div>
+      ) : (
+        <div className={styles.layers}>
+          {ready.map((layer) => (
+            <img
+              key={layer.imageUrl}
+              className={styles.layer}
+              src={layer.imageUrl ?? undefined}
+              alt={`SPHEREx ${layer.bandId} image observed ${layer.observedAt}`}
+              draggable={false}
+            />
+          ))}
+        </div>
+      )}
+      {rendering && ready.length > 0 && (
+        <LoadProgress variant="bar" label="Rendering the remaining images" done={done} total={total} />
+      )}
     </div>
   );
 }

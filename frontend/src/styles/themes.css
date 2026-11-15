@@ -130,6 +130,7 @@
   /* The sky viewer stays dark in both themes, like the night sky it displays. */
   --color-viewer-background: #0b1020;
   --color-on-viewer: #f3f6fb;
+  --color-viewer-warning: #f2b84b;
 
   /* Mapped targets on the sky sphere: a fixed, soft starlight palette (same in both themes). */
   --sky-target-1: #9fd0ff;
