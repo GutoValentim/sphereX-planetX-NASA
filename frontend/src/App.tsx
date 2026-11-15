@@ -21,6 +21,11 @@ function SiteWallpaper() {
   return SOLID_BACKGROUND_ROUTES.includes(pathname) ? null : <ParallaxWallpaper />;
 }
 
+function SiteClouds() {
+  const { pathname } = useLocation();
+  return SOLID_BACKGROUND_ROUTES.includes(pathname) ? null : <WallpaperClouds />;
+}
+
 function App() {
   return (
     <BrowserRouter>
@@ -28,7 +33,7 @@ function App() {
       <div id="hero-backdrop" className="hero-backdrop" />
       <SiteWallpaper />
       <div className="parallax-content">
-        <WallpaperClouds />
+        <SiteClouds />
         <Suspense
           fallback={
             <PageContainer>
