@@ -10,7 +10,10 @@ function HeroSection() {
       <div className={styles.content}>
         <p className={styles.eyebrow}>NASA Space Apps Challenge</p>
         <h1 id="hero-title" className={styles.title}>
-          Sky Explorer
+          SPHEREx
+        </h1>
+        <h1 id="hero-subtitle" className={styles.brand}>
+          Sky and Time Explorer
         </h1>
         <p className={styles.intro}>
           Explore observations from NASA’s SPHEREx mission. Choose a position in the sky and a date, and Sky

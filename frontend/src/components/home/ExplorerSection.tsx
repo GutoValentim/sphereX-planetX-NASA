@@ -52,10 +52,10 @@ function FeatureRow({ feature }: { feature: ExplorerFeature }) {
 }
 
 function ExplorerSection() {
-  const { id, title, paragraphs, isDraft } = EXPLORER_SECTION;
+  const { id, title, paragraphs } = EXPLORER_SECTION;
 
   return (
-    <HomePanel id={id} title={title} isDraft={isDraft}>
+    <HomePanel id={id} title={title}>
       {paragraphs.map((paragraph) => (
         <p key={paragraph} className={styles.intro}>
           {paragraph}

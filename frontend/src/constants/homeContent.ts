@@ -8,7 +8,6 @@ export const SPHEREX_SECTION: HomeSectionCopy = {
     'SPHEREx is a NASA mission that observes the entire sky.',
     'This section will present the mission’s history, its goals and the technology on board.',
   ],
-  isDraft: true,
 };
 
 export const EXPLORER_SECTION: HomeSectionCopy = {
@@ -17,7 +16,6 @@ export const EXPLORER_SECTION: HomeSectionCopy = {
   paragraphs: [
     'Sky Explorer is being built for the NASA Space Apps Challenge. Choose a position in the sky, a date and a spectral band, and the matching observation opens below.',
   ],
-  isDraft: true,
 };
 
 export const EXPLORER_FEATURES: readonly ExplorerFeature[] = [
@@ -41,7 +39,6 @@ export const TEAM_SECTION: HomeSectionCopy = {
   id: 'team',
   title: 'Who we are',
   paragraphs: ['The people building Sky Explorer. Names are listed in alphabetical order.'],
-  isDraft: true,
 };
 
 /**

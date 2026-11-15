@@ -1,6 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import AladinViewer from './AladinViewer';
+import MonochromePanel from './MonochromePanel';
 import ObservationMetadata from './ObservationMetadata';
+import SavedImages from './SavedImages';
 import SpectralBandPanel from './SpectralBandPanel';
 import SpectralChart from './SpectralChart';
 import SpherexFrameView from './SpherexFrameView';
@@ -11,9 +14,12 @@ import { useBandSelection } from '../../hooks/useBandSelection';
 import { useObservationFrames } from '../../hooks/useObservationFrames';
 import { useSpectrum } from '../../hooks/useSpectrum';
 import { useTimeline } from '../../hooks/useTimeline';
+import { ROUTES } from '../../routes/paths';
 import type { ObservationQuery } from '../../types/observation';
 import type { ViewMode } from '../../types/viewer';
 import { toSpectrumDatasets } from '../../utils/apiMapping';
+import { rememberImage, type SavedImage } from '../../utils/imageHistory';
+import { toQueryParams } from '../../utils/observationQueryParams';
 import styles from './ObservationWorkspace.module.css';
 
 /** The viewer shows individual SPHEREx detectors; "P (all bands)" is a form shortcut, not a layer. */
@@ -27,14 +33,25 @@ interface ObservationWorkspaceProps {
 }
 
 function ObservationWorkspace({ query }: ObservationWorkspaceProps) {
+  const navigate = useNavigate();
   const [viewMode, setViewMode] = useState<ViewMode>('image');
   const [imageSource, setImageSource] = useState<ImageSource>('spherex');
+  const [monochrome, setMonochrome] = useState(false);
+  const [monoRequested, setMonoRequested] = useState(false);
   // Heavy views start on first use and then stay mounted, so switching back is instant.
   const [referenceRequested, setReferenceRequested] = useState(false);
   const [chartRequested, setChartRequested] = useState(false);
 
   const { selectedBandIds, toggleBand, selectAll, clearAll } = useBandSelection(DISPLAY_BAND_IDS);
-  const source = useObservationFrames(query);
+  const colorSource = useObservationFrames(query, 'falsa');
+  const monoSource = useObservationFrames(query, 'mono', monoRequested);
+  const source = monochrome ? monoSource : colorSource;
+
+  useEffect(() => {
+    if (colorSource.status === 'ready' && colorSource.frames.some((frame) => frame.layers?.some((layer) => layer.imageUrl))) {
+      rememberImage(query);
+    }
+  }, [colorSource.status, colorSource.frames, query]);
   const timeline = useTimeline(source.frames, { preferredDate: query.observationDate });
   const spectrum = useSpectrum(query, chartRequested);
 
@@ -56,6 +73,10 @@ function ObservationWorkspace({ query }: ObservationWorkspaceProps) {
     if (next === 'reference') setReferenceRequested(true);
     setImageSource(next);
   };
+  const openSavedImage = (image: SavedImage) => {
+    const params = toQueryParams(image);
+    navigate({ pathname: ROUTES.viewer, search: `?${params}` });
+  };
 
   const spectrumProgress = spectrum.progress.total
     ? ` (${spectrum.progress.done}/${spectrum.progress.total} observations)`
@@ -68,14 +89,22 @@ function ObservationWorkspace({ query }: ObservationWorkspaceProps) {
   return (
     <div className={styles.workspace}>
       <div className={styles.main}>
-        <SpectralBandPanel
-          className={styles.bands}
-          bands={DISPLAY_BANDS}
-          selectedBandIds={selectedBandIds}
-          onToggle={toggleBand}
-          onSelectAll={selectAll}
-          onClearAll={clearAll}
-        />
+        <div className={styles.bands}>
+          <SpectralBandPanel
+            bands={DISPLAY_BANDS}
+            selectedBandIds={selectedBandIds}
+            onToggle={toggleBand}
+            onSelectAll={selectAll}
+            onClearAll={clearAll}
+          />
+          <MonochromePanel
+            enabled={monochrome}
+            onChange={(enabled) => {
+              setMonochrome(enabled);
+              if (enabled) setMonoRequested(true);
+            }}
+          />
+        </div>
 
         {/* Both views stay mounted so switching modes does not recreate the viewer or chart instances. */}
         <div className={styles.stage}>
@@ -95,6 +124,7 @@ function ObservationWorkspace({ query }: ObservationWorkspaceProps) {
               >
                 Reference sky (DSS2)
               </button>
+              <SavedImages onOpen={openSavedImage} />
             </div>
             <div className={styles.sourceView} hidden={imageSource !== 'spherex'}>
               <SpherexFrameView

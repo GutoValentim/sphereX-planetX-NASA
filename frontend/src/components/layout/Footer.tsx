@@ -9,7 +9,7 @@ function Footer() {
       <div className={styles.inner}>
         <div className={styles.top}>
           <div className={styles.identity}>
-            <p className={styles.name}>Sky Explorer</p>
+            <p className={styles.name}>SPHEREx - Sky and Time Explorer</p>
             <p className={styles.event}>NASA Space Apps Challenge · {currentYear}</p>
           </div>
           <nav aria-label="Related links">

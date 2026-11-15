@@ -5,11 +5,11 @@ import HomePanel from './HomePanel';
 import styles from './TeamSection.module.css';
 
 function TeamSection() {
-  const { id, title, paragraphs, isDraft } = TEAM_SECTION;
+  const { id, title, paragraphs } = TEAM_SECTION;
   const members = sortTeamMembers(TEAM_MEMBERS);
 
   return (
-    <HomePanel id={id} title={title} isDraft={isDraft}>
+    <HomePanel id={id} title={title}>
       {paragraphs.map((paragraph) => (
         <p key={paragraph} className={styles.intro}>
           {paragraph}

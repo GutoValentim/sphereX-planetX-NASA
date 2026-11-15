@@ -4,10 +4,10 @@ import HomePanel from './HomePanel';
 import styles from './SpherexSection.module.css';
 
 function SpherexSection() {
-  const { id, title, paragraphs, isDraft } = SPHEREX_SECTION;
+  const { id, title, paragraphs } = SPHEREX_SECTION;
 
   return (
-    <HomePanel id={id} title={title} isDraft={isDraft}>
+    <HomePanel id={id} title={title}>
       <div className={styles.layout}>
         <div className={styles.copy}>
           {paragraphs.map((paragraph) => (

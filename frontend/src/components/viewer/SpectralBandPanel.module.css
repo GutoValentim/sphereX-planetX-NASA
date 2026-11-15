@@ -59,6 +59,20 @@
   accent-color: var(--color-primary);
 }
 
+.label {
+  flex: 1;
+  min-width: 0;
+}
+
+.swatch {
+  flex-shrink: 0;
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-left: auto;
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+}
+
 .status {
   margin: 0;
   font-size: var(--font-size-xs);

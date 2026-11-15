@@ -15,3 +15,16 @@ export const SPECTRAL_BANDS: readonly SpectralBandOption[] = [
   { id: 'D5', label: 'D5 — 3.83–4.41 µm' },
   { id: 'D6', label: 'D6 — 4.42–5.00 µm' },
 ];
+
+/**
+ * False-color display of each detector, matching the backend's infrared-to-sRGB map.
+ * D1 (shortest wavelength) is blue; D6 (longest) is red.
+ */
+export const BAND_DISPLAY_COLOR: Readonly<Record<string, string>> = {
+  D1: 'rgb(0, 17, 255)',
+  D2: 'rgb(0, 248, 255)',
+  D3: 'rgb(86, 255, 0)',
+  D4: 'rgb(255, 245, 0)',
+  D5: 'rgb(255, 109, 0)',
+  D6: 'rgb(255, 48, 0)',
+};
