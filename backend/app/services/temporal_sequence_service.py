@@ -15,9 +15,16 @@ from typing import Any, Callable, Iterable
 
 from astropy import units as u
 from astropy.coordinates import SkyCoord
+import numpy as np
 
 from app.schemas.observations import ObservationQuery, ObservationRecord
-from app.services.frame_generator import GeneratedFrame, generate_frame_from_array
+from app.services.frame_generator import (
+    COLOR_MODES,
+    DEFAULT_RENDER_PROFILE,
+    GeneratedFrame,
+    generate_frame_from_array,
+    get_render_profile,
+)
 from app.services.image_aligner import (
     AlignedImage,
     CommonSkyGrid,
@@ -25,14 +32,16 @@ from app.services.image_aligner import (
     build_common_sky_grid,
 )
 from app.services.irsa_client import IrsaClient
+from app.services.spectral_color import get_spherex_band
 
 
 FIXED_SEQUENCE_FOV_ARCMIN = 30.0
 FIXED_SOURCE_CUTOUT_FOV_ARCMIN = 45.0
+FIXED_SEQUENCE_PIXEL_SCALE_ARCSEC = 6.15
 DEFAULT_SEQUENCE_BANDPASS = "SPHEREx-D3"
 DEFAULT_MAX_SEQUENCE_FRAMES = 100
 DEFAULT_DOWNLOAD_WORKERS = 8
-FRAME_CACHE_VERSION = 2
+FRAME_CACHE_VERSION = 8
 SEQUENCE_MODES = frozenset({"fast", "balanced", "full"})
 _SAFE_IDENTIFIER = re.compile(r"[^A-Za-z0-9._-]+")
 _SAFE_REQUEST_ID = re.compile(r"[0-9a-f]{16}")
@@ -103,6 +112,7 @@ class TemporalDataset:
     discovered_at: str
     cache_hit: bool
     dataset_path: str
+    pixel_scale_arcsec: float = FIXED_SEQUENCE_PIXEL_SCALE_ARCSEC
 
     @property
     def frame_count(self) -> int:
@@ -176,6 +186,7 @@ class SpherexTemporalSequenceService:
         bandpass: str = DEFAULT_SEQUENCE_BANDPASS,
         max_frames: int = DEFAULT_MAX_SEQUENCE_FRAMES,
         download_workers: int = DEFAULT_DOWNLOAD_WORKERS,
+        pixel_scale_arcsec: float = FIXED_SEQUENCE_PIXEL_SCALE_ARCSEC,
     ) -> None:
         if not 0 < fov_arcmin <= 60:
             raise ValueError("fov_arcmin deve estar no intervalo (0, 60].")
@@ -187,13 +198,16 @@ class SpherexTemporalSequenceService:
             raise ValueError("max_frames deve ser maior que zero.")
         if not 1 <= download_workers <= 8:
             raise ValueError("download_workers deve estar no intervalo [1, 8].")
+        if not 0.5 <= pixel_scale_arcsec <= 30:
+            raise ValueError("pixel_scale_arcsec deve estar no intervalo [0.5, 30].")
 
         self.irsa_client = irsa_client or IrsaClient()
         self.fov_arcmin = fov_arcmin
         self.cutout_fov_arcmin = cutout_fov_arcmin
-        self.bandpass = bandpass
+        self.bandpass = get_spherex_band(bandpass).bandpass
         self.max_frames = max_frames
         self.download_workers = download_workers
+        self.pixel_scale_arcsec = float(pixel_scale_arcsec)
         self._locks_guard = Lock()
         self._cache_locks: dict[str, Lock] = {}
         self._frame_locks: dict[tuple[str, int], Lock] = {}
@@ -216,6 +230,7 @@ class SpherexTemporalSequenceService:
             dec_deg=dec_deg,
             fov_arcmin=self.fov_arcmin,
             cutout_fov_arcmin=self.cutout_fov_arcmin,
+            pixel_scale_arcsec=self.pixel_scale_arcsec,
             bandpass=self.bandpass,
             collections=collections,
             start_time=start_time,
@@ -247,6 +262,7 @@ class SpherexTemporalSequenceService:
             discovered_at=datetime.now(timezone.utc).isoformat(),
             cache_hit=False,
             dataset_path=str(dataset_path),
+            pixel_scale_arcsec=self.pixel_scale_arcsec,
         )
         _write_manifest(dataset_path, dataset.to_dict())
         return dataset
@@ -283,11 +299,20 @@ class SpherexTemporalSequenceService:
         observation_index: int,
         output_directory: Path,
         overwrite: bool = False,
+        render_profile: str = DEFAULT_RENDER_PROFILE,
+        color_mode: str = "color",
     ) -> LazyFrameResult:
-        """Baixa, converte e armazena um frame, reutilizando o cache existente."""
+        """Baixa, alinha e renderiza um frame, reutilizando o cache existente.
+
+        Cada combinação ``render_profile``/``color_mode`` é uma variante com
+        arquivos e escala visual próprios. O FITS e a matriz alinhada são
+        compartilhados entre variantes, então trocar a renderização não refaz
+        download nem reprojeção.
+        """
 
         if not 0 <= observation_index < dataset.frame_count:
             raise IndexError("observation_index fora do intervalo do dataset.")
+        variant = _variant_key(render_profile, color_mode)
         root = output_directory.expanduser().resolve()
         dataset_directory = self._cache_target(root, dataset.request_id)
         state_lock = self._cache_lock(dataset.request_id)
@@ -297,14 +322,13 @@ class SpherexTemporalSequenceService:
             observation = dataset.observations[observation_index]
             with state_lock:
                 state = _read_frame_state(state_path)
-                cached = state["frames"].get(observation.observation_id)
+                cached = _variant_state(state, variant)["frames"].get(observation.observation_id)
                 if cached and not overwrite:
                     result = _lazy_frame_from_dict(cached, cache_hit=True)
                     if Path(result.fits_path).exists() and Path(result.frame.path).exists():
                         return result
 
             fits_directory = dataset_directory / "fits"
-            frames_directory = dataset_directory / "frames"
             fits_path = self.irsa_client.download(
                 observation,
                 fits_directory,
@@ -313,7 +337,9 @@ class SpherexTemporalSequenceService:
                 overwrite=overwrite,
             )
             identifier = _SAFE_IDENTIFIER.sub("_", observation.observation_id)
-            frame_path = frames_directory / f"{observation_index + 1:03d}_{identifier}.webp"
+            stem = f"{observation_index + 1:03d}_{identifier}"
+            frame_path = dataset_directory / "frames" / variant / f"{stem}.webp"
+            aligned_path = dataset_directory / "aligned" / f"{stem}.npz"
             with state_lock:
                 state = _read_frame_state(state_path)
                 if state["common_grid"] is None:
@@ -322,23 +348,28 @@ class SpherexTemporalSequenceService:
                         center_ra_deg=dataset.ra_deg,
                         center_dec_deg=dataset.dec_deg,
                         fov_arcmin=dataset.fov_arcmin,
+                        pixel_scale_arcsec=dataset.pixel_scale_arcsec,
                     )
                     state["common_grid"] = grid.to_dict()
                     _write_manifest(state_path, state)
                 else:
                     grid = CommonSkyGrid.from_dict(state["common_grid"])
 
-            aligned_image = align_fits_image(fits_path, grid)
+            aligned_image = _load_or_align(fits_path, grid, aligned_path, overwrite=overwrite)
+            render_options = {
+                "bandpass": dataset.bandpass,
+                "render_profile": render_profile,
+                "color_mode": color_mode,
+            }
             with state_lock:
                 state = _read_frame_state(state_path)
-                if state["display_min"] is None or state["display_max"] is None:
+                variant_state = _variant_state(state, variant)
+                if variant_state["display_min"] is None or variant_state["display_max"] is None:
                     generated = _generate_aligned_frame(
-                        aligned_image,
-                        frame_path,
-                        grid,
+                        aligned_image, frame_path, grid, **render_options
                     )
-                    state["display_min"] = generated.display_min
-                    state["display_max"] = generated.display_max
+                    variant_state["display_min"] = generated.display_min
+                    variant_state["display_max"] = generated.display_max
                     result = LazyFrameResult(
                         request_id=dataset.request_id,
                         observation_index=observation_index,
@@ -348,11 +379,11 @@ class SpherexTemporalSequenceService:
                         frame=generated,
                         cache_hit=False,
                     )
-                    state["frames"][observation.observation_id] = result.to_dict()
+                    variant_state["frames"][observation.observation_id] = result.to_dict()
                     _write_manifest(state_path, state)
                     return result
-                display_min = float(state["display_min"])
-                display_max = float(state["display_max"])
+                display_min = float(variant_state["display_min"])
+                display_max = float(variant_state["display_max"])
 
             generated = _generate_aligned_frame(
                 aligned_image,
@@ -360,6 +391,7 @@ class SpherexTemporalSequenceService:
                 grid,
                 display_min=display_min,
                 display_max=display_max,
+                **render_options,
             )
 
             result = LazyFrameResult(
@@ -373,7 +405,9 @@ class SpherexTemporalSequenceService:
             )
             with state_lock:
                 state = _read_frame_state(state_path)
-                state["frames"][observation.observation_id] = result.to_dict()
+                _variant_state(state, variant)["frames"][observation.observation_id] = (
+                    result.to_dict()
+                )
                 _write_manifest(state_path, state)
             return result
 
@@ -385,6 +419,8 @@ class SpherexTemporalSequenceService:
         output_directory: Path,
         overwrite: bool = False,
         on_progress: FrameProgressCallback | None = None,
+        render_profile: str = DEFAULT_RENDER_PROFILE,
+        color_mode: str = "color",
     ) -> FramePrefetchResult:
         """Materializa todo o lote e informa cada frame assim que ele fica pronto.
 
@@ -409,7 +445,11 @@ class SpherexTemporalSequenceService:
                 observation_index=observation_index,
                 output_directory=output_directory,
                 overwrite=overwrite,
+                render_profile=render_profile,
+                color_mode=color_mode,
             )
+
+        _variant_key(render_profile, color_mode)  # valida antes de abrir threads
 
         def record(
             observation_index: int,
@@ -528,6 +568,7 @@ class SpherexTemporalSequenceService:
             dec_deg=dec_deg,
             fov_arcmin=self.fov_arcmin,
             cutout_fov_arcmin=self.cutout_fov_arcmin,
+            pixel_scale_arcsec=self.pixel_scale_arcsec,
             bandpass=self.bandpass,
             collections=collections,
             start_time=start_time,
@@ -551,6 +592,7 @@ class SpherexTemporalSequenceService:
             center_ra_deg=ra_deg,
             center_dec_deg=dec_deg,
             fov_arcmin=self.fov_arcmin,
+            pixel_scale_arcsec=self.pixel_scale_arcsec,
         )
         frames = self._generate_frames(
             candidates,
@@ -672,6 +714,7 @@ class SpherexTemporalSequenceService:
                 aligned_image,
                 output_path,
                 common_grid,
+                bandpass=self.bandpass,
                 **options,
             )
             if display_range is None:
@@ -754,24 +797,26 @@ def _request_id(
     dec_deg: float,
     fov_arcmin: float,
     cutout_fov_arcmin: float,
+    pixel_scale_arcsec: float = FIXED_SEQUENCE_PIXEL_SCALE_ARCSEC,
     bandpass: str,
     collections: tuple[str, ...],
     start_time: datetime | None,
     end_time: datetime | None,
 ) -> str:
-    payload = json.dumps(
-        {
-            "ra_deg": round(ra_deg, 9),
-            "dec_deg": round(dec_deg, 9),
-            "fov_arcmin": fov_arcmin,
-            "cutout_fov_arcmin": cutout_fov_arcmin,
-            "bandpass": bandpass,
-            "collections": collections,
-            "start_time": start_time.isoformat() if start_time else None,
-            "end_time": end_time.isoformat() if end_time else None,
-        },
-        sort_keys=True,
-    )
+    fields: dict[str, Any] = {
+        "ra_deg": round(ra_deg, 9),
+        "dec_deg": round(dec_deg, 9),
+        "fov_arcmin": fov_arcmin,
+        "cutout_fov_arcmin": cutout_fov_arcmin,
+        "bandpass": bandpass,
+        "collections": collections,
+        "start_time": start_time.isoformat() if start_time else None,
+        "end_time": end_time.isoformat() if end_time else None,
+    }
+    # Só entra no identificador quando difere do padrão, preservando os caches existentes.
+    if pixel_scale_arcsec != FIXED_SEQUENCE_PIXEL_SCALE_ARCSEC:
+        fields["pixel_scale_arcsec"] = pixel_scale_arcsec
+    payload = json.dumps(fields, sort_keys=True)
     return sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
@@ -794,6 +839,9 @@ def _load_dataset(path: Path, *, cache_hit: bool) -> TemporalDataset:
         discovered_at=data["discovered_at"],
         cache_hit=cache_hit,
         dataset_path=str(path),
+        pixel_scale_arcsec=float(
+            data.get("pixel_scale_arcsec", FIXED_SEQUENCE_PIXEL_SCALE_ARCSEC)
+        ),
     )
 
 
@@ -803,7 +851,7 @@ def _read_frame_state(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("processing_version") != FRAME_CACHE_VERSION:
         return _empty_frame_state()
-    if not isinstance(data.get("frames"), dict):
+    if not isinstance(data.get("variants"), dict):
         raise ValueError("Cache de frames inválido.")
     if data.get("common_grid") is not None:
         CommonSkyGrid.from_dict(data["common_grid"])
@@ -813,11 +861,75 @@ def _read_frame_state(path: Path) -> dict[str, Any]:
 def _empty_frame_state() -> dict[str, Any]:
     return {
         "processing_version": FRAME_CACHE_VERSION,
-        "display_min": None,
-        "display_max": None,
         "common_grid": None,
-        "frames": {},
+        "variants": {},
     }
+
+
+def _variant_key(render_profile: str, color_mode: str) -> str:
+    profile = get_render_profile(render_profile)
+    if color_mode not in COLOR_MODES:
+        raise ValueError(f"Modo de cor inválido. Use um de: {', '.join(COLOR_MODES)}.")
+    return f"{profile.name}-{color_mode}"
+
+
+def _variant_state(state: dict[str, Any], variant: str) -> dict[str, Any]:
+    """Escala visual e frames de uma variante de renderização."""
+
+    return state["variants"].setdefault(
+        variant, {"display_min": None, "display_max": None, "frames": {}}
+    )
+
+
+def _load_or_align(
+    fits_path: Path,
+    grid: CommonSkyGrid,
+    cache_path: Path,
+    *,
+    overwrite: bool = False,
+) -> AlignedImage:
+    """Reprojeta uma vez e guarda a matriz alinhada para as demais variantes."""
+
+    if cache_path.exists() and not overwrite:
+        try:
+            with np.load(cache_path, allow_pickle=False) as stored:
+                wavelength = stored["wavelength_um"] if "wavelength_um" in stored else None
+                unit = str(stored["source_unit"]) or None
+                return AlignedImage(
+                    data=stored["data"],
+                    source_unit=unit,
+                    coverage_fraction=float(stored["coverage_fraction"]),
+                    center_covered=bool(stored["center_covered"]),
+                    wavelength_um=wavelength,
+                    wavelength_min_um=_optional_float(stored, "wavelength_min_um"),
+                    wavelength_max_um=_optional_float(stored, "wavelength_max_um"),
+                    wavelength_median_um=_optional_float(stored, "wavelength_median_um"),
+                )
+        except (OSError, KeyError, ValueError):
+            pass  # cache corrompido: reprojeta novamente
+
+    aligned = align_fits_image(fits_path, grid)
+    arrays: dict[str, Any] = {
+        "data": aligned.data,
+        "source_unit": np.array(aligned.source_unit or ""),
+        "coverage_fraction": np.array(aligned.coverage_fraction),
+        "center_covered": np.array(aligned.center_covered),
+    }
+    if aligned.wavelength_um is not None:
+        arrays["wavelength_um"] = aligned.wavelength_um
+    for name in ("wavelength_min_um", "wavelength_max_um", "wavelength_median_um"):
+        value = getattr(aligned, name)
+        if value is not None:
+            arrays[name] = np.array(value)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = cache_path.with_name(cache_path.stem + ".tmp.npz")
+    np.savez(temporary, **arrays)
+    temporary.replace(cache_path)
+    return aligned
+
+
+def _optional_float(stored: Any, name: str) -> float | None:
+    return float(stored[name]) if name in stored else None
 
 
 def _generate_aligned_frame(
@@ -825,9 +937,18 @@ def _generate_aligned_frame(
     output_path: Path,
     grid: CommonSkyGrid,
     *,
+    bandpass: str,
     display_min: float | None = None,
     display_max: float | None = None,
+    render_profile: str = DEFAULT_RENDER_PROFILE,
+    color_mode: str = "color",
 ) -> GeneratedFrame:
+    band = get_spherex_band(bandpass)
+    wavelength_um: Any = None
+    if color_mode == "color":
+        wavelength_um = aligned_image.wavelength_um
+        if wavelength_um is None:
+            wavelength_um = band.center_um
     return generate_frame_from_array(
         aligned_image.data,
         output_path,
@@ -838,6 +959,8 @@ def _generate_aligned_frame(
         center_ra_deg=grid.center_ra_deg,
         center_dec_deg=grid.center_dec_deg,
         coverage_fraction=aligned_image.coverage_fraction,
+        wavelength_um=wavelength_um,
+        render_profile=render_profile,
     )
 
 
