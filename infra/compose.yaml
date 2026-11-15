@@ -105,6 +105,45 @@ services:
       start_period: 20s
       retries: 5
 
+  # Laboratório de mapeamento (dev/temporal-lab): interface própria, autenticação
+  # HTTP Basic gerada no primeiro start (/opt/docker/spherex/lab/CREDENTIALS.txt).
+  # Cada versão do motor roda como subprocesso em 127.0.0.1 dentro deste container.
+  lab:
+    <<: *runtime
+    image: python:3.12-slim-bookworm
+    command: ["/app/.venv/bin/python", "dev/temporal-lab/server.py", "--host", "0.0.0.0", "--port", "8765"]
+    working_dir: /app
+    volumes:
+      - ${SPHEREX_LAB_RELEASE_DIR:-/opt/docker/spherex/current-lab}:/app:ro
+      - /opt/docker/spherex/lab:/data
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    environment:
+      HOME: /tmp
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      SPHEREX_LAB_DATA_DIR: /data
+      SPHEREX_LAB_AUTH: required
+      SPHEREX_RELEASE_ENV: /app/.release.env
+    pids_limit: 512
+    mem_limit: 3g
+    cpus: 1.5
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import json,urllib.request;v=dict(l.strip().split('=',1) for l in open('/app/.release.env') if '=' in l)['GIT_SHA'];r=json.load(urllib.request.urlopen('http://127.0.0.1:8765/api/health?light=1',timeout=2));raise SystemExit(r.get('version')!=v)"]
+      interval: 10s
+      timeout: 3s
+      start_period: 30s
+      retries: 5
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: web
+      traefik.http.routers.spherex-lab.rule: Host(`${LAB_DOMAIN:-lab.spherex.prospectordigital.com.br}`)
+      traefik.http.routers.spherex-lab.entrypoints: websecure
+      traefik.http.routers.spherex-lab.tls: "true"
+      traefik.http.routers.spherex-lab.tls.certresolver: lets-encrypt
+      traefik.http.routers.spherex-lab.service: spherex-lab
+      traefik.http.services.spherex-lab.loadbalancer.server.port: "8765"
+
 networks:
   web:
     external: true

@@ -17,14 +17,18 @@ mensagens de commit em inglês (Conventional Commits: `feat:`, `fix(frontend):`�
 
 ```
 Navegador ─HTTPS─▶ Traefik ─┬─▶ frontend (Node :8080)            rede web
-                            └─▶ api (Node :3000) ─HTTP─▶ python (FastAPI :8000) ─HTTPS─▶ IRSA
-                                                  rede interna spherex_internal
+                            ├─▶ api (Node :3000) ─HTTP─▶ python (FastAPI :8000) ─HTTPS─▶ IRSA
+                            │                     rede interna spherex_internal
+                            └─▶ lab (Python :8765, senha) ─▶ motores v1, v2… (subprocessos) ─▶ IRSA
 ```
 
 - Frontend React/Vite: <https://spherex.prospectordigital.com.br>
 - API Node/Express (gateway público): <https://api.spherex.prospectordigital.com.br>
 - FastAPI (`backend/app/main.py`): só na rede interna (`http://spherex-python:8000`);
   cache gravável em `/opt/docker/spherex/cache`.
+- Lab (`dev/temporal-lab`): <https://lab.spherex.prospectordigital.com.br>, HTTP Basic
+  (credenciais em `/opt/docker/spherex/lab/CREDENTIALS.txt`); acervo em
+  `/opt/docker/spherex/lab` — **não apagar**: são os dados mapeados para o produto.
 - VPS Oracle ARM64, Docker, Portainer, Traefik. Deploy automático em todo push na
   `main` (GitHub Actions). **Merge na `main` = publicação em produção.**
 
@@ -40,13 +44,13 @@ Mais em `docs/architecture.md` e `infra/README.md`.
 | `backend/app/services/` | Núcleo científico: `irsa_client`, `image_aligner`, `frame_generator` (perfis de renderização), `spectral_color`, `temporal_sequence_service`, `sequence_jobs`, `spectrum_service`, `spectrum_jobs`, `spectrum_chart`, `cutout_cache`. |
 | `backend/tests/` | `api.test.ts` (Node) e `test_*.py` (Python). |
 | `infra/` | `compose.yaml`, `deploy.sh`, `ssh-deploy.sh`, testes de deploy. |
-| `dev/temporal-lab/` | Laboratório local (não publicado) para presets de renderização, FOV e espectro. |
+| `dev/temporal-lab/` | Laboratório de mapeamento (publicado em `lab.spherex…`): `server.py` (gateway, registros, fila, exportação), `engine_server.py` (API científica, uma cópia congelada por versão do motor), `lab_store.py`. Ver o README dele. |
 | `prototypes/` | Protótipos isolados (ex.: `sky-sphere`). |
 | `docs/` | `api.md` (contratos), `architecture.md`, `DESIGN_SYSTEM.md`, doc do frontend. |
 
 Classificação usada pelo CI e pelo deploy: `backend/*.py` e
-`backend/requirements*.txt` → serviço Python; resto de `backend/` → API Node;
-`frontend/` → frontend; `infra/` → stack inteira; `package.json`,
+`backend/requirements*.txt` → serviço Python **e** lab; `dev/temporal-lab/` → lab;
+resto de `backend/` → API Node; `frontend/` → frontend; `infra/` → stack inteira; `package.json`,
 `package-lock.json`, `eslint.config.mjs` → API e frontend. Arquivos fora disso
 (como este) não disparam deploy.
 
@@ -87,7 +91,8 @@ cd backend && pip install -r requirements-dev.txt && uvicorn app.main:app --port
 Laboratório (a porta 8765 costuma estar ocupada; use outra e reaproveite o cache):
 
 ```sh
-SPHEREX_LAB_CACHE_DIR="<cache do lab>" <venv>/bin/python dev/temporal-lab/server.py --port 8766
+SPHEREX_LAB_DATA_DIR="<dados do lab>" SPHEREX_LAB_CACHE_DIR="<cache antigo, opcional>" \
+  <venv>/bin/python dev/temporal-lab/server.py --port 8766
 ```
 
 ## Validação antes de PR (mesmos passos do CI)
@@ -100,6 +105,8 @@ node --test frontend/tests/*.test.mjs
 npm run typecheck --workspace frontend
 npm run build --workspace frontend
 python3 -m unittest discover -s infra/tests
+node --test dev/temporal-lab/tests/*.test.mjs
+<venv>/bin/python -m unittest discover -s dev/temporal-lab/tests -p 'test_*.py'
 cd backend && <venv>/bin/python -m unittest discover -s tests -p 'test_*.py'
 ```
 
@@ -112,6 +119,10 @@ cd backend && <venv>/bin/python -m unittest discover -s tests -p 'test_*.py'
   CI **não** os atualiza. Se mudarem, instale via SSH administrativo antes do
   merge (comando em `infra/README.md`).
 - Conflitos em `package-lock.json`: nunca resolver à mão; rode `npm install` na raiz.
+- Mudanças em `backend/app/**/*.py` chegam ao lab como “código novo”, mas não
+  alteram versões do motor já congeladas: quem testa cria uma versão nova na aba
+  “Versões do motor”. Mudar o formato do cache ou da API do `engine_server.py`
+  exige que a interface do lab continue compatível com as versões antigas.
 - `infra/tests` precisam rodar no bash 3.2 do macOS (sem `declare -A` nem `${x^^}`).
 - Docker local pode falhar com o keychain do macOS travado; teste containers em
   containers descartáveis na VPS.

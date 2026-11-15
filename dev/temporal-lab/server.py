@@ -1,791 +1,887 @@
 #!/usr/bin/env python3
-"""Servidor local do laboratório de sequências temporais SPHEREx."""
+"""Gateway do laboratório SPHEREx: interface, registros, versões do motor e mapeamento.
+
+Cada versão do motor (``engine_server.py`` + ``backend/app`` congelados) roda em
+um subprocesso próprio em 127.0.0.1, com cache próprio. Este processo serve a
+interface, guarda os registros nomeados, calcula a cobertura a partir do disco,
+executa a fila de mapeamento e grava as exportações para o produto.
+"""
 
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
-from datetime import datetime
-from hashlib import sha256
-from math import ceil
+import base64
+from collections import deque
+from hashlib import pbkdf2_hmac
+import hmac
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
 import os
 from pathlib import Path
+import secrets
+import shutil
+import subprocess
 import sys
-from threading import Lock, Thread
-from time import monotonic
+from threading import Condition, Lock, Thread
+import time
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, unquote, urlparse
+from urllib.request import Request, urlopen
+
+import lab_store
+from lab_store import (
+    BANDS,
+    CacheIndex,
+    EngineRegistry,
+    RecordStore,
+    compute_coverage,
+    coordinate_key,
+    export_record,
+    now_iso,
+    read_json,
+    write_json,
+)
 
 
 LAB_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = LAB_ROOT.parents[1]
-EXTERNAL_DEV_ROOT = PROJECT_ROOT.parent / "dev"
 PUBLIC_ROOT = LAB_ROOT / "public"
-CACHE_ROOT = Path(
+DATA_ROOT = Path(
     os.environ.get(
-        "SPHEREX_LAB_CACHE_DIR",
-        EXTERNAL_DEV_ROOT / "results" / "temporal-lab-cache",
+        "SPHEREX_LAB_DATA_DIR",
+        PROJECT_ROOT.parent / "dev" / "results" / "temporal-lab-data",
     )
 ).expanduser()
-sys.path.insert(0, str(PROJECT_ROOT / "backend"))
-
-from app.services.frame_generator import (  # noqa: E402
-    COLOR_MODES,
-    RENDER_PROFILES,
-    get_render_profile,
-)
-from app.services.temporal_sequence_service import (  # noqa: E402
-    FIXED_SEQUENCE_PIXEL_SCALE_ARCSEC,
-    FRAME_CACHE_VERSION,
-    SequenceLimitExceeded,
-    SpherexTemporalSequenceService,
-)
-from app.services.spectrum_jobs import SpectrumJobManager  # noqa: E402
-from app.services.spectrum_service import SpherexSpectrumService  # noqa: E402
-from app.services.spectral_color import (  # noqa: E402
-    SPHEREX_BANDS,
-    get_spherex_band,
-)
-
-
-# Janela final (FOV) em arcmin. O recorte-fonte cresce na mesma proporção
-# (1,5×) para que rotações e a reprojeção nunca deixem cantos sem dados.
+LEGACY_CACHE = os.environ.get("SPHEREX_LAB_CACHE_DIR")
+ENGINE_BASE_PORT = int(os.environ.get("SPHEREX_LAB_ENGINE_BASE_PORT", "8800"))
 FOV_OPTIONS = (10.0, 15.0, 20.0, 30.0, 40.0)
-DEFAULT_FOV_ARCMIN = 30.0
-CUTOUT_RATIO = 1.5
-SAMPLING_OPTIONS = {
-    "native": FIXED_SEQUENCE_PIXEL_SCALE_ARCSEC,
-    "2x": FIXED_SEQUENCE_PIXEL_SCALE_ARCSEC / 2,
-}
-DEFAULT_SAMPLING = "native"
-DEFAULT_RENDER_PROFILE = "limpa"
-
-_SERVICES: dict[tuple[str, float, str], SpherexTemporalSequenceService] = {}
-_SERVICES_LOCK = Lock()
+SAMPLINGS = ("native", "2x")
+THEMES = ("dark", "light")
+# Falhas do IRSA (502/503) costumam ser transitórias: espera crescente entre tentativas.
+RETRY_DELAYS = (5, 20, 60)
 
 
-def service_for(
-    bandpass: str,
-    fov_arcmin: float = DEFAULT_FOV_ARCMIN,
-    sampling: str = DEFAULT_SAMPLING,
-) -> SpherexTemporalSequenceService:
-    band = get_spherex_band(bandpass)
-    key = (band.bandpass, float(fov_arcmin), sampling)
-    with _SERVICES_LOCK:
-        service = _SERVICES.get(key)
-        if service is None:
-            service = SpherexTemporalSequenceService(
-                bandpass=band.bandpass,
-                fov_arcmin=key[1],
-                cutout_fov_arcmin=key[1] * CUTOUT_RATIO,
-                pixel_scale_arcsec=SAMPLING_OPTIONS[sampling],
-                download_workers=8,
+def release_sha() -> str | None:
+    path = os.environ.get("SPHEREX_RELEASE_ENV")
+    if path and Path(path).is_file():
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
+            if line.startswith("GIT_SHA="):
+                return line.split("=", 1)[1].strip()
+    try:
+        return subprocess.run(
+            ["git", "-C", str(PROJECT_ROOT), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5, check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+VERSION = release_sha()
+
+
+# -------------------------------------------------------------- autenticação
+
+
+class BasicAuth:
+    """Usuário/senha gerados no primeiro start e guardados no diretório de dados."""
+
+    def __init__(self, data_root: Path, required: bool) -> None:
+        self.required = required
+        self._accepted: set[str] = set()
+        self._lock = Lock()
+        self.config: dict[str, Any] | None = None
+        if not required:
+            return
+        path = data_root / "auth.json"
+        self.config = read_json(path)
+        if self.config is None:
+            password = secrets.token_urlsafe(18)
+            salt = secrets.token_hex(16)
+            self.config = {
+                "username": "spherex",
+                "salt": salt,
+                "iterations": 200_000,
+                "hash": pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), 200_000).hex(),
+            }
+            write_json(path, self.config)
+            path.chmod(0o600)
+            credentials = data_root / "CREDENTIALS.txt"
+            credentials.write_text(
+                "SPHEREx Lab — acesso HTTP Basic\n"
+                f"usuário: {self.config['username']}\nsenha: {password}\n"
+                "Para trocar: apague auth.json e CREDENTIALS.txt e reinicie o container.\n",
+                encoding="utf-8",
             )
-            _SERVICES[key] = service
-        return service
+            credentials.chmod(0o600)
+            print(f"Credenciais do laboratório criadas em {credentials}", flush=True)
+
+    def check(self, header: str | None) -> bool:
+        if not self.required:
+            return True
+        if not header or not header.startswith("Basic "):
+            return False
+        with self._lock:
+            if header in self._accepted:
+                return True
+        try:
+            username, password = base64.b64decode(header[6:]).decode("utf-8").split(":", 1)
+        except (ValueError, UnicodeDecodeError):
+            return False
+        config = self.config or {}
+        digest = pbkdf2_hmac(
+            "sha256", password.encode(), bytes.fromhex(config["salt"]), int(config["iterations"])
+        ).hex()
+        valid = hmac.compare_digest(username, config["username"]) and hmac.compare_digest(
+            digest, config["hash"]
+        )
+        if valid:
+            with self._lock:
+                self._accepted.add(header)
+        return valid
 
 
-def service_for_dataset(dataset: Any) -> SpherexTemporalSequenceService:
-    sampling = next(
-        (name for name, scale in SAMPLING_OPTIONS.items()
-         if abs(scale - dataset.pixel_scale_arcsec) < 1e-9),
-        DEFAULT_SAMPLING,
-    )
-    return service_for(dataset.bandpass, dataset.fov_arcmin, sampling)
+# ------------------------------------------------------------------ motores
 
 
-DEFAULT_SERVICE = service_for("SPHEREx-D3")
-
-
-def parse_render_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    """Valida FOV, amostragem, perfil de renderização e modo de cor."""
-
-    fov = float(payload.get("fov_arcmin", DEFAULT_FOV_ARCMIN))
-    if fov not in FOV_OPTIONS:
-        raise ValueError(f"FOV inválido. Use um de: {', '.join(f'{v:g}' for v in FOV_OPTIONS)}.")
-    sampling = str(payload.get("sampling", DEFAULT_SAMPLING))
-    if sampling not in SAMPLING_OPTIONS:
-        raise ValueError(f"Amostragem inválida. Use uma de: {', '.join(SAMPLING_OPTIONS)}.")
-    render_profile = get_render_profile(
-        str(payload.get("render_profile", DEFAULT_RENDER_PROFILE))
-    ).name
-    color_mode = str(payload.get("color_mode", "color"))
-    if color_mode not in COLOR_MODES:
-        raise ValueError(f"Modo de cor inválido. Use um de: {', '.join(COLOR_MODES)}.")
-    return {
-        "fov_arcmin": fov,
-        "sampling": sampling,
-        "render_profile": render_profile,
-        "color_mode": color_mode,
-    }
-
-
-def settings_catalog() -> dict[str, Any]:
-    return {
-        "fov_options": [
-            {
-                "fov_arcmin": fov,
-                "cutout_fov_arcmin": fov * CUTOUT_RATIO,
-                "pixels": {
-                    name: _grid_pixels(fov, scale) for name, scale in SAMPLING_OPTIONS.items()
-                },
-            }
-            for fov in FOV_OPTIONS
-        ],
-        "sampling_options": [
-            {"name": name, "pixel_scale_arcsec": scale}
-            for name, scale in SAMPLING_OPTIONS.items()
-        ],
-        "render_profiles": [profile.to_dict() for profile in RENDER_PROFILES.values()],
-        "color_modes": list(COLOR_MODES),
-        "defaults": {
-            "fov_arcmin": DEFAULT_FOV_ARCMIN,
-            "sampling": DEFAULT_SAMPLING,
-            "render_profile": DEFAULT_RENDER_PROFILE,
-            "color_mode": "color",
-        },
-    }
-
-
-def _grid_pixels(fov_arcmin: float, pixel_scale_arcsec: float) -> int:
-    size = max(3, ceil(fov_arcmin * 60 / pixel_scale_arcsec))
-    return size + 1 if size % 2 == 0 else size
-
-
-@dataclass
-class PrefetchJob:
-    job_id: str
-    request_id: str
-    bandpass: str
-    render_profile: str
-    color_mode: str
-    mode: str
-    total: int
-    started_at: float = field(default_factory=monotonic)
-    status: str = "running"
-    frames: dict[int, dict[str, Any]] = field(default_factory=dict)
-    errors: dict[int, str] = field(default_factory=dict)
-    finished_at: float | None = None
-    lock: Lock = field(default_factory=Lock)
-
-    def snapshot(self) -> dict[str, Any]:
-        with self.lock:
-            elapsed_until = self.finished_at or monotonic()
-            return {
-                "job_id": self.job_id,
-                "request_id": self.request_id,
-                "bandpass": self.bandpass,
-                "render_profile": self.render_profile,
-                "color_mode": self.color_mode,
-                "mode": self.mode,
-                "status": self.status,
-                "total": self.total,
-                "completed": len(self.frames),
-                "failed": len(self.errors),
-                "processed": len(self.frames) + len(self.errors),
-                "cache_hits": sum(
-                    1 for frame in self.frames.values() if frame["cache_hit"]
-                ),
-                "elapsed_ms": round((elapsed_until - self.started_at) * 1000, 1),
-                "frames": [self.frames[index] for index in sorted(self.frames)],
-                "errors": [
-                    {"observation_index": index, "error": self.errors[index]}
-                    for index in sorted(self.errors)
-                ],
-            }
-
-
-class PrefetchJobManager:
-    def __init__(self) -> None:
-        self._jobs: dict[str, PrefetchJob] = {}
+class EngineWorker:
+    def __init__(self, engine_id: str, code_dir: Path, cache_dir: Path) -> None:
+        self.engine_id = engine_id
+        self.code_dir = code_dir
+        self.cache_dir = cache_dir
+        self.port = ENGINE_BASE_PORT + int(engine_id[1:])
+        self.process: subprocess.Popen[bytes] | None = None
+        self.catalog: dict[str, Any] | None = None
         self._lock = Lock()
 
-    def start(
-        self,
-        service: SpherexTemporalSequenceService,
-        dataset: Any,
-        indices: list[int],
-        mode: str,
-        *,
-        render_profile: str,
-        color_mode: str,
-    ) -> dict[str, Any]:
-        key = (
-            f"{dataset.request_id}:{mode}:{render_profile}-{color_mode}:"
-            f"{','.join(map(str, indices))}"
-        )
-        job_id = sha256(key.encode("utf-8")).hexdigest()[:16]
+    def ensure(self) -> None:
         with self._lock:
-            existing = self._jobs.get(job_id)
-            if existing is not None and existing.status == "running":
-                return existing.snapshot()
-            job = PrefetchJob(
-                job_id=job_id,
-                request_id=dataset.request_id,
-                bandpass=dataset.bandpass,
-                render_profile=render_profile,
-                color_mode=color_mode,
-                mode=mode,
-                total=len(indices),
+            if self.process is not None and self.process.poll() is None:
+                return
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            env = {
+                **os.environ,
+                "SPHEREX_LAB_CACHE_DIR": str(self.cache_dir),
+                "PYTHONUNBUFFERED": "1",
+            }
+            env.pop("PYTHONPATH", None)
+            script = self.code_dir / "dev" / "temporal-lab" / "engine_server.py"
+            self.process = subprocess.Popen(
+                [sys.executable, str(script), "--host", "127.0.0.1", "--port", str(self.port)],
+                cwd=str(script.parent),
+                env=env,
             )
-            self._jobs[job_id] = job
-        Thread(
-            target=self._run,
-            args=(job, service, dataset, indices),
-            name=f"spherex-prefetch-{job_id}",
-            daemon=True,
-        ).start()
-        return job.snapshot()
+            deadline = time.monotonic() + 180
+            while time.monotonic() < deadline:
+                if self.process.poll() is not None:
+                    raise RuntimeError(f"O motor {self.engine_id} encerrou ao iniciar.")
+                status, data = self._call("GET", "/api/health", None, 3)
+                if status == 200:
+                    self.catalog = data.get("settings")
+                    return
+                time.sleep(0.5)
+            raise RuntimeError(f"O motor {self.engine_id} não respondeu a tempo.")
 
-    def get(self, job_id: str) -> dict[str, Any]:
-        with self._lock:
-            job = self._jobs.get(job_id)
-        if job is None:
-            raise FileNotFoundError(f"Pré-carregamento {job_id} não encontrado.")
-        return job.snapshot()
+    def variants(self) -> list[str]:
+        self.ensure()
+        catalog = self.catalog or {}
+        profiles = [item["name"] for item in catalog.get("render_profiles", [])]
+        return [f"{profile}-{color}" for profile in profiles for color in catalog.get("color_modes", [])]
 
-    def is_running(self, request_id: str | None = None) -> bool:
-        with self._lock:
-            jobs = list(self._jobs.values())
-        return any(
-            job.status == "running"
-            and (request_id is None or job.request_id == request_id)
-            for job in jobs
+    def call(self, method: str, path: str, payload: Any = None, timeout: float = 60) -> tuple[int, dict[str, Any]]:
+        self.ensure()
+        return self._call(method, path, payload, timeout)
+
+    def raw(self, method: str, path: str, body: bytes | None, timeout: float = 300) -> tuple[int, bytes]:
+        self.ensure()
+        request = Request(
+            f"http://127.0.0.1:{self.port}{path}",
+            data=body,
+            method=method,
+            headers={"Content-Type": "application/json"},
         )
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                return response.status, response.read()
+        except HTTPError as error:
+            return error.code, error.read()
+        except (URLError, OSError) as error:
+            message = json.dumps({"error": f"Motor {self.engine_id} indisponível: {error}"})
+            return 502, message.encode("utf-8")
 
-    def _run(
-        self,
-        job: PrefetchJob,
-        service: SpherexTemporalSequenceService,
-        dataset: Any,
-        indices: list[int],
-    ) -> None:
-        def on_progress(index: int, result: Any, error: str | None) -> None:
-            with job.lock:
-                if result is not None:
-                    job.frames[index] = {
-                        "observation_index": index,
-                        "observation_id": result.observation.observation_id,
-                        "image_url": (
-                            f"/cache/{job.request_id}/{result.relative_path}"
-                            f"?v={FRAME_CACHE_VERSION}"
-                        ),
-                        "cache_hit": result.cache_hit,
-                        "aligned": result.frame.aligned,
-                        "center_ra_deg": result.frame.center_ra_deg,
-                        "center_dec_deg": result.frame.center_dec_deg,
-                        "coverage_fraction": result.frame.coverage_fraction,
-                        "colorized": result.frame.colorized,
-                        "wavelength_min_um": result.frame.wavelength_min_um,
-                        "wavelength_max_um": result.frame.wavelength_max_um,
-                        "wavelength_median_um": result.frame.wavelength_median_um,
-                        "visible_wavelength_min_nm": (
-                            result.frame.visible_wavelength_min_nm
-                        ),
-                        "visible_wavelength_max_nm": (
-                            result.frame.visible_wavelength_max_nm
-                        ),
-                        "visible_wavelength_median_nm": (
-                            result.frame.visible_wavelength_median_nm
-                        ),
-                        "false_color_rgb": result.frame.false_color_rgb,
-                        "opacity": result.frame.opacity,
-                        "render_profile": result.frame.render_profile,
-                        "stretch": result.frame.stretch,
-                        "background_mode": result.frame.background_mode,
-                        "noise_sigma": result.frame.noise_sigma,
-                        "width": result.frame.width,
-                        "height": result.frame.height,
-                    }
-                else:
-                    job.errors[index] = error or "Falha desconhecida."
+    def _call(self, method: str, path: str, payload: Any, timeout: float) -> tuple[int, dict[str, Any]]:
+        body = json.dumps(payload).encode("utf-8") if payload is not None else None
+        request = Request(
+            f"http://127.0.0.1:{self.port}{path}",
+            data=body,
+            method=method,
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                return response.status, json.loads(response.read() or b"{}")
+        except HTTPError as error:
+            try:
+                return error.code, json.loads(error.read() or b"{}")
+            except json.JSONDecodeError:
+                return error.code, {"error": f"HTTP {error.code}"}
+        except (URLError, OSError, json.JSONDecodeError) as error:
+            return 0, {"error": str(error)}
+
+    def stop(self) -> None:
+        if self.process is not None and self.process.poll() is None:
+            self.process.terminate()
+
+
+class EngineManager:
+    def __init__(self, registry: EngineRegistry) -> None:
+        self.registry = registry
+        self._workers: dict[str, EngineWorker] = {}
+        self._indexes: dict[str, CacheIndex] = {}
+        self._lock = Lock()
+
+    def worker(self, engine_id: str) -> EngineWorker:
+        with self._lock:
+            worker = self._workers.get(engine_id)
+            if worker is None:
+                worker = EngineWorker(
+                    engine_id, self.registry.code_dir(engine_id), self.registry.cache_dir(engine_id)
+                )
+                self._workers[engine_id] = worker
+            return worker
+
+    def index(self, engine_id: str) -> CacheIndex:
+        with self._lock:
+            index = self._indexes.get(engine_id)
+            if index is None:
+                index = CacheIndex(self.registry.cache_dir(engine_id))
+                self._indexes[engine_id] = index
+            return index
+
+    def stop(self) -> None:
+        for worker in self._workers.values():
+            worker.stop()
+
+
+# ------------------------------------------------------------- mapeamento
+
+
+def validate_plan(payload: dict[str, Any]) -> dict[str, Any]:
+    bands = [str(value) for value in payload.get("bands") or BANDS]
+    if not bands or any(band not in BANDS for band in bands):
+        raise ValueError("Bandas inválidas.")
+    configs = []
+    for item in payload.get("configs") or []:
+        fov = float(item.get("fov_arcmin"))
+        sampling = str(item.get("sampling", "native"))
+        if fov not in FOV_OPTIONS or sampling not in SAMPLINGS:
+            raise ValueError("Configuração de FOV/amostragem inválida.")
+        configs.append({"fov_arcmin": fov, "sampling": sampling})
+    configs = [dict(item) for item in {(c["fov_arcmin"], c["sampling"]): c for c in configs}.values()]
+    spectrum = bool(payload.get("spectrum", True))
+    if not configs and not spectrum:
+        raise ValueError("Escolha pelo menos um FOV ou o espectro.")
+    return {
+        "bands": sorted(dict.fromkeys(bands), key=BANDS.index),
+        "configs": configs,
+        "spectrum": spectrum,
+    }
+
+
+class Cancelled(Exception):
+    pass
+
+
+class MappingQueue:
+    """Mapeia alvos inteiros no servidor, um por vez, sem depender da aba aberta."""
+
+    def __init__(self, records: RecordStore, engines: EngineManager) -> None:
+        self.records = records
+        self.engines = engines
+        self._queue: deque[tuple[str, str]] = deque()
+        self._current: tuple[str, str] | None = None
+        self._cancelled: set[tuple[str, str]] = set()
+        self._condition = Condition()
+        Thread(target=self._loop, name="spherex-lab-mapping", daemon=True).start()
+
+    def recover(self) -> None:
+        """Após reinício/deploy, retoma o que estava na fila ou em execução."""
+
+        for record in sorted(self.records.list(), key=lambda item: item.get("updated_at", "")):
+            for engine_id, state in (record.get("mapping") or {}).items():
+                if state.get("status") in {"queued", "running"}:
+                    state["status"] = "queued"
+                    state["progress"] = {**state.get("progress", {}), "label": "Retomado após reinício"}
+                    self.records.set_mapping(record["id"], engine_id, state)
+                    with self._condition:
+                        self._queue.append((record["id"], engine_id))
+                        self._condition.notify()
+
+    def enqueue(self, record_id: str, engine_id: str, plan: dict[str, Any]) -> dict[str, Any]:
+        key = (record_id, engine_id)
+        with self._condition:
+            if key == self._current or key in self._queue:
+                raise ValueError("Este registro já está na fila de mapeamento deste motor.")
+            self._cancelled.discard(key)
+            total = len(plan["configs"]) * len(plan["bands"]) + (1 if plan["spectrum"] else 0)
+            state = {
+                "status": "queued",
+                "plan": plan,
+                "queued_at": now_iso(),
+                "started_at": None,
+                "finished_at": None,
+                "errors": [],
+                "unavailable": {},
+                "progress": {"done": 0, "total": total, "label": "Na fila"},
+            }
+            record = self.records.set_mapping(record_id, engine_id, state)
+            self._queue.append(key)
+            self._condition.notify()
+            return record
+
+    def cancel(self, record_id: str, engine_id: str) -> None:
+        key = (record_id, engine_id)
+        with self._condition:
+            if key in self._queue:
+                self._queue.remove(key)
+                record = self.records.get(record_id)
+                state = record["mapping"][engine_id]
+                state.update(status="cancelled", finished_at=now_iso())
+                state["progress"]["label"] = "Cancelado"
+                self.records.set_mapping(record_id, engine_id, state)
+            elif key == self._current:
+                self._cancelled.add(key)
+            else:
+                raise ValueError("Este registro não está sendo mapeado.")
+
+    def is_busy(self, record_id: str) -> bool:
+        with self._condition:
+            return any(key[0] == record_id for key in [*self._queue, *([self._current] if self._current else [])])
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._condition:
+            return {
+                "current": list(self._current) if self._current else None,
+                "queued": [list(item) for item in self._queue],
+            }
+
+    def _loop(self) -> None:
+        while True:
+            with self._condition:
+                while not self._queue:
+                    self._condition.wait()
+                key = self._queue.popleft()
+                self._current = key
+            try:
+                self._run(*key)
+            except Exception as error:  # nunca derruba a fila
+                print(f"Mapeamento {key} falhou: {error}", flush=True)
+                self._finish(*key, status="error", error=str(error))
+            finally:
+                with self._condition:
+                    self._current = None
+                    self._cancelled.discard(key)
+
+    def _state(self, record_id: str, engine_id: str) -> dict[str, Any]:
+        return self.records.get(record_id)["mapping"][engine_id]
+
+    def _save(self, record_id: str, engine_id: str, state: dict[str, Any]) -> None:
+        self.records.set_mapping(record_id, engine_id, state)
+
+    def _check(self, record_id: str, engine_id: str) -> None:
+        with self._condition:
+            if (record_id, engine_id) in self._cancelled:
+                raise Cancelled()
+
+    def _finish(self, record_id: str, engine_id: str, *, status: str, error: str | None = None) -> None:
+        try:
+            state = self._state(record_id, engine_id)
+        except (FileNotFoundError, KeyError):
+            return
+        if error:
+            state["errors"].append({"bandpass": None, "step": "geral", "error": error})
+        state.update(status=status, finished_at=now_iso())
+        state["progress"]["label"] = {
+            "completed": "Concluído",
+            "partial": "Concluído com falhas",
+            "cancelled": "Cancelado",
+        }.get(status, "Falhou")
+        self._save(record_id, engine_id, state)
+
+    def _run(self, record_id: str, engine_id: str) -> None:
+        record = self.records.get(record_id)
+        state = record["mapping"][engine_id]
+        plan = state["plan"]
+        worker = self.engines.worker(engine_id)
+        state.update(status="running", started_at=now_iso(), errors=[], unavailable={})
+        state["progress"].update(done=0, label="Iniciando motor")
+        self._save(record_id, engine_id, state)
+        variants = worker.variants()
+        ra, dec = record["ra_deg"], record["dec_deg"]
+
+        def step(label: str) -> None:
+            self._check(record_id, engine_id)
+            state["progress"]["label"] = label
+            self._save(record_id, engine_id, state)
+
+        def done() -> None:
+            state["progress"]["done"] += 1
+            self._save(record_id, engine_id, state)
 
         try:
-            service.prefetch_frames(
-                dataset=dataset,
-                observation_indices=indices,
-                output_directory=CACHE_ROOT,
-                on_progress=on_progress,
-                render_profile=job.render_profile,
-                color_mode=job.color_mode,
-            )
-            with job.lock:
-                job.status = "partial" if job.errors else "completed"
-                job.finished_at = monotonic()
-        except Exception as error:
-            with job.lock:
-                job.status = "failed"
-                job.errors[-1] = str(error)
-                job.finished_at = monotonic()
+            if plan["spectrum"]:
+                step("Espectro · " + " ".join(b.replace("SPHEREx-", "") for b in plan["bands"]))
+                self._spectrum(worker, record_id, engine_id, ra, dec, plan["bands"], state)
+                done()
+            for config in plan["configs"]:
+                key = lab_store.config_key(config["fov_arcmin"], config["sampling"])
+                for bandpass in plan["bands"]:
+                    short = bandpass.replace("SPHEREx-", "")
+                    outcome = None
+                    for position, variant in enumerate(variants):
+                        step(f"Imagens {config['fov_arcmin']:g}′ {config['sampling']} · {short} · "
+                             f"variante {position + 1}/{len(variants)}")
+                        profile, color = variant.rsplit("-", 1)
+                        outcome, message = self._prefetch(worker, {
+                            "ra_deg": ra,
+                            "dec_deg": dec,
+                            "bandpass": bandpass,
+                            "mode": "full",
+                            "fov_arcmin": config["fov_arcmin"],
+                            "sampling": config["sampling"],
+                            "render_profile": profile,
+                            "color_mode": color,
+                        }, lambda: self._check(record_id, engine_id))
+                        if outcome == "unavailable":
+                            state["unavailable"].setdefault(f"images:{key}", []).append(bandpass)
+                            break
+                        if outcome in {"error", "fatal"}:
+                            state["errors"].append({
+                                "bandpass": bandpass, "step": f"imagens {key} {variant}", "error": message,
+                            })
+                            if outcome == "fatal":
+                                break
+                    done()
+            step("Exportando para o produto")
+            export_for(record_id, engine_id)
+        except Cancelled:
+            self._finish(record_id, engine_id, status="cancelled")
+            return
+        self._finish(record_id, engine_id, status="partial" if state["errors"] else "completed")
+
+    def _prefetch(self, worker: EngineWorker, payload: dict[str, Any], check: Any) -> tuple[str, str | None]:
+        last_error = None
+        for attempt in range(len(RETRY_DELAYS) + 1):
+            if attempt:
+                time.sleep(RETRY_DELAYS[attempt - 1])
+            check()
+            status, data = worker.call("POST", "/api/datasets", payload, timeout=300)
+            if status == 404:
+                return "unavailable", data.get("error")
+            if status in {400, 422}:
+                return "fatal", data.get("error")  # ex.: mais épocas que o limite
+            if status != 200:
+                last_error = data.get("error") or f"HTTP {status}"
+                continue
+            snapshot = self._poll(worker, f"/api/prefetch/{data['prefetch']['job_id']}", check)
+            if snapshot is None:
+                last_error = "Motor reiniciado durante o pré-carregamento."
+                continue
+            if snapshot.get("status") == "failed" or snapshot.get("failed"):
+                errors = snapshot.get("errors") or [{}]
+                last_error = errors[0].get("error") or "Falha ao materializar frames."
+                continue
+            return "ok", None
+        return "error", last_error
+
+    def _spectrum(
+        self,
+        worker: EngineWorker,
+        record_id: str,
+        engine_id: str,
+        ra: float,
+        dec: float,
+        bands: list[str],
+        state: dict[str, Any],
+    ) -> None:
+        check = lambda: self._check(record_id, engine_id)  # noqa: E731
+        results_dir = DATA_ROOT / "engines" / engine_id / "results" / record_id
+        for theme in THEMES:
+            summary, last_error = None, None
+            for attempt in range(len(RETRY_DELAYS) + 1):
+                if attempt:
+                    time.sleep(RETRY_DELAYS[attempt - 1])
+                check()
+                status, data = worker.call("POST", "/api/composites", {
+                    "ra_deg": ra, "dec_deg": dec, "bandpasses": bands, "output": "spectrum", "theme": theme,
+                }, timeout=120)
+                if status != 200:
+                    last_error = data.get("error") or f"HTTP {status}"
+                    continue
+                snapshot = self._poll(worker, f"/api/spectra/{data['job']['job_id']}", check)
+                if snapshot is None or snapshot.get("status") != "completed":
+                    last_error = (snapshot or {}).get("error") or "Falha ao montar o espectro."
+                    continue
+                summary = snapshot["result"]
+                failed = [band for band in summary["bands"] if band.get("failed")]
+                if not failed:
+                    break
+                last_error = f"{sum(len(b['failed']) for b in failed)} medições falharam por rede."
+            if summary is None:
+                state["errors"].append({"bandpass": None, "step": f"espectro {theme}", "error": last_error})
+                continue
+            write_json(results_dir / f"spectrum-{theme}.json", summary)
+            unavailable = []
+            for band in summary["bands"]:
+                if band.get("error") and not band.get("observation_count"):
+                    unavailable.append(band["bandpass"])
+                elif band.get("failed"):
+                    state["errors"].append({
+                        "bandpass": band["bandpass"],
+                        "step": f"espectro {theme}",
+                        "error": f"{len(band['failed'])} observações sem medição (rede).",
+                    })
+            state["unavailable"]["spectrum"] = unavailable
+
+    @staticmethod
+    def _poll(worker: EngineWorker, path: str, check: Any) -> dict[str, Any] | None:
+        misses = 0
+        while True:
+            check()
+            status, data = worker.call("GET", path, timeout=30)
+            if status == 200:
+                misses = 0
+                if data.get("status") != "running":
+                    return data
+            else:
+                misses += 1
+                if misses > 5:
+                    return None
+            time.sleep(1.5)
 
 
-PREFETCH_JOBS = PrefetchJobManager()
-SPECTRUM_SERVICE = SpherexSpectrumService(download_workers=8)
-OUTPUTS = ("image", "spectrum")
+# --------------------------------------------------------------- serviços
 
 
-def _cache_url(path: Path) -> str:
-    relative = Path(path).resolve().relative_to(CACHE_ROOT.resolve())
-    return f"/cache/{relative.as_posix()}"
+REGISTRY: EngineRegistry
+ENGINES: EngineManager
+RECORDS: RecordStore
+QUEUE: MappingQueue
+AUTH: BasicAuth
 
 
-SPECTRUM_JOBS = SpectrumJobManager(SPECTRUM_SERVICE, CACHE_ROOT, _cache_url)
+def coverage_for(record: dict[str, Any], engine_id: str, scan: dict | None = None) -> dict[str, Any]:
+    scan = scan if scan is not None else ENGINES.index(engine_id).scan()
+    entry = scan.get(coordinate_key(record["ra_deg"], record["dec_deg"]))
+    return compute_coverage(record, entry, engine_id, ENGINES.worker(engine_id).variants())
 
 
-class TemporalLabHandler(BaseHTTPRequestHandler):
-    server_version = "SPHERExTemporalLab/0.1"
+def export_for(record_id: str, engine_id: str) -> dict[str, Any]:
+    record = RECORDS.get(record_id)
+    engine = REGISTRY.get(engine_id)
+    cache_root = REGISTRY.cache_dir(engine_id).resolve()
+    entry = ENGINES.index(engine_id).scan().get(coordinate_key(record["ra_deg"], record["dec_deg"]))
+    results_dir = DATA_ROOT / "engines" / engine_id / "results" / record_id
+    spectra = {theme: read_json(results_dir / f"spectrum-{theme}.json") for theme in THEMES}
+    return export_record(record, engine, cache_root, entry, spectra, DATA_ROOT / "exports")
 
-    def end_headers(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        super().end_headers()
 
-    def do_OPTIONS(self) -> None:  # noqa: N802
-        self.send_response(HTTPStatus.NO_CONTENT)
+def purge_record_cache(record: dict[str, Any], engine_id: str) -> int:
+    entry = ENGINES.index(engine_id).scan().get(coordinate_key(record["ra_deg"], record["dec_deg"]))
+    worker = ENGINES.worker(engine_id)
+    removed = 0
+    for dataset_id in (entry or {}).get("dataset_ids", []):
+        status, data = worker.call("DELETE", f"/api/cache/{dataset_id}")
+        if status == 409:
+            raise RuntimeError(data.get("error") or "Dataset em uso.")
+        if status == 200:
+            removed += int(data.get("removed", 0))
+    results = DATA_ROOT / "engines" / engine_id / "results" / record["id"]
+    if results.is_dir():
+        shutil.rmtree(results)
+    exports = DATA_ROOT / "exports" / engine_id
+    for export in exports.glob(f"*-{record['id'][:6]}"):
+        if export.is_dir():
+            shutil.rmtree(export)
+    if exports.is_dir():
+        lab_store.write_export_index(exports)
+    return removed
+
+
+class LabHandler(BaseHTTPRequestHandler):
+    server_version = "SPHERExLab/1.0"
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+        if args and str(args[0]).startswith(("GET /api/e/", "GET /api/records", "GET /cache/")):
+            return  # polling frequente
+        super().log_message(format, *args)
+
+    # ------------------------------------------------------------ dispatch
+
+    def _authorized(self) -> bool:
+        path = urlparse(self.path).path
+        if path == "/api/health" and self.client_address[0] in {"127.0.0.1", "::1"}:
+            return True
+        if AUTH.check(self.headers.get("Authorization")):
+            return True
+        body = b'{"error": "Autentica\\u00e7\\u00e3o necess\\u00e1ria."}'
+        self.close_connection = True
+        self.send_response(HTTPStatus.UNAUTHORIZED)
+        self.send_header("WWW-Authenticate", 'Basic realm="SPHEREx Lab", charset="UTF-8"')
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
+        self.wfile.write(body)
+        return False
 
     def do_GET(self) -> None:  # noqa: N802
-        path = urlparse(self.path).path
-        if path == "/api/health":
-            self._send_json(
-                {
-                    "status": "ok",
-                    "cache_directory": str(CACHE_ROOT),
-                    "fov_arcmin": DEFAULT_SERVICE.fov_arcmin,
-                    "cutout_fov_arcmin": DEFAULT_SERVICE.cutout_fov_arcmin,
-                    "bands": [band.to_dict() for band in SPHEREX_BANDS],
-                    "settings": settings_catalog(),
-                }
-            )
-            return
-        parts = path.strip("/").split("/")
-        if len(parts) == 3 and parts[:2] == ["api", "spectra"]:
-            try:
-                self._send_json(SPECTRUM_JOBS.snapshot(parts[2]))
-            except FileNotFoundError as error:
-                self._send_error_json(HTTPStatus.NOT_FOUND, str(error))
-            return
-        if len(parts) == 3 and parts[:2] == ["api", "prefetch"]:
-            try:
-                self._send_json(PREFETCH_JOBS.get(parts[2]))
-            except FileNotFoundError as error:
-                self._send_error_json(HTTPStatus.NOT_FOUND, str(error))
-            return
-        if path.startswith("/cache/"):
-            self._serve_cached_frame(path)
-            return
-        self._serve_public(path)
+        self._dispatch("GET")
 
     def do_POST(self) -> None:  # noqa: N802
-        path = urlparse(self.path).path
-        try:
-            if path == "/api/datasets":
-                self._discover_dataset()
-                return
-            if path == "/api/composites":
-                self._discover_composite()
-                return
-            parts = path.strip("/").split("/")
-            if (
-                len(parts) == 5
-                and parts[0] == "api"
-                and parts[1] == "datasets"
-                and parts[3] == "frames"
-            ):
-                self._materialize_frame(parts[2], int(parts[4]))
-                return
-            self._send_error_json(HTTPStatus.NOT_FOUND, "Endpoint não encontrado.")
-        except SequenceLimitExceeded as error:
-            self._send_error_json(
-                HTTPStatus.UNPROCESSABLE_ENTITY,
-                str(error),
-                {"found": error.found, "limit": error.limit},
-            )
-        except (ValueError, IndexError, json.JSONDecodeError) as error:
-            self._send_error_json(HTTPStatus.BAD_REQUEST, str(error))
-        except FileNotFoundError as error:
-            self._send_error_json(HTTPStatus.NOT_FOUND, str(error))
-        except Exception as error:  # laboratório local: torna a falha observável
-            self.log_error("Erro interno: %s", error)
-            self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
+        self._dispatch("POST")
+
+    def do_PATCH(self) -> None:  # noqa: N802
+        self._dispatch("PATCH")
 
     def do_DELETE(self) -> None:  # noqa: N802
-        path = urlparse(self.path).path
+        self._dispatch("DELETE")
+
+    def _dispatch(self, method: str) -> None:
+        if not self._authorized():
+            return
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = {key: values[0] for key, values in parse_qs(parsed.query).items()}
+        parts = [unquote(part) for part in path.strip("/").split("/")] if path != "/" else []
         try:
-            if path == "/api/cache":
-                if PREFETCH_JOBS.is_running() or SPECTRUM_JOBS.is_running():
-                    self._send_error_json(
-                        HTTPStatus.CONFLICT,
-                        "Aguarde o pré-carregamento atual terminar antes de limpar o cache.",
-                    )
-                    return
-                removed = DEFAULT_SERVICE.clear_cache(CACHE_ROOT)
-                self._send_json({"removed": removed, "scope": "all"})
-                return
-            parts = path.strip("/").split("/")
-            if len(parts) == 3 and parts[:2] == ["api", "cache"]:
-                if PREFETCH_JOBS.is_running(parts[2]):
-                    self._send_error_json(
-                        HTTPStatus.CONFLICT,
-                        "Este dataset ainda está sendo pré-carregado.",
-                    )
-                    return
-                removed = DEFAULT_SERVICE.clear_cache(CACHE_ROOT, parts[2])
-                self._send_json(
-                    {"removed": removed, "scope": "dataset", "request_id": parts[2]}
-                )
-                return
-            self._send_error_json(HTTPStatus.NOT_FOUND, "Endpoint não encontrado.")
-        except ValueError as error:
-            self._send_error_json(HTTPStatus.BAD_REQUEST, str(error))
+            if method == "GET" and not path.startswith(("/api/", "/cache/", "/exports/")):
+                self._serve_public(path)
+            elif parts[:1] == ["cache"] and method == "GET":
+                self._serve_cache(parts[1:])
+            elif parts[:1] == ["exports"] and method == "GET":
+                self._serve_export(parts[1:])
+            elif parts[:2] == ["api", "e"] and len(parts) >= 4:
+                self._proxy(method, parts[2], "/".join(parts[3:]), parsed.query)
+            elif path == "/api/health" and method == "GET":
+                self._health(light=query.get("light") == "1")
+            elif parts[:2] == ["api", "engines"]:
+                self._engines(method, parts[2:])
+            elif parts[:2] == ["api", "records"]:
+                self._records(method, parts[2:], query)
+            elif path == "/api/queue" and method == "GET":
+                self._send_json(QUEUE.snapshot())
+            else:
+                self._send_error(HTTPStatus.NOT_FOUND, "Endpoint não encontrado.")
+        except FileNotFoundError as error:
+            self._send_error(HTTPStatus.NOT_FOUND, str(error))
+        except (ValueError, KeyError, json.JSONDecodeError) as error:
+            self._send_error(HTTPStatus.BAD_REQUEST, str(error))
+        except RuntimeError as error:
+            self._send_error(HTTPStatus.CONFLICT, str(error))
+        except Exception as error:  # torna a falha observável na interface
+            self.log_error("Erro interno: %s", error)
+            self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
 
-    def _discover_dataset(self) -> None:
-        payload = self._read_json()
-        ra_deg = float(payload["ra_deg"])
-        dec_deg = float(payload["dec_deg"])
-        mode = str(payload.get("mode", "balanced"))
-        bandpass = str(payload.get("bandpass", "SPHEREx-D3"))
-        settings = parse_render_settings(payload)
-        service = service_for(bandpass, settings["fov_arcmin"], settings["sampling"])
-        spectral_band = get_spherex_band(bandpass)
-        refresh = bool(payload.get("refresh", False))
-        started = monotonic()
-        dataset = service.discover_dataset(
-            ra_deg=ra_deg,
-            dec_deg=dec_deg,
-            output_directory=CACHE_ROOT,
-            use_cache=not refresh,
-        )
-        selected_indices = service.select_indices(dataset, mode)
-        prefetch = PREFETCH_JOBS.start(
-            service,
-            dataset,
-            selected_indices,
-            mode,
-            render_profile=settings["render_profile"],
-            color_mode=settings["color_mode"],
-        )
-        frames = []
-        previous_time: datetime | None = None
-        for position, observation_index in enumerate(selected_indices):
-            observation = dataset.observations[observation_index]
-            observed_at = datetime.fromisoformat(observation.observed_at or "")
-            gap = None
-            if previous_time is not None:
-                gap = (observed_at - previous_time).total_seconds()
-            previous_time = observed_at
-            frames.append(
-                {
-                    "position": position,
-                    "observation_index": observation_index,
-                    "observation_id": observation.observation_id,
-                    "observed_at": observation.observed_at,
-                    "observation_end": observation.observation_end,
-                    "gap_from_previous_seconds": gap,
-                    "bandpass": observation.bandpass,
-                }
-            )
+    # ------------------------------------------------------------- rotas
 
-        self._send_json(
-            {
-                "request_id": dataset.request_id,
-                "ra_deg": dataset.ra_deg,
-                "dec_deg": dataset.dec_deg,
-                "fov_arcmin": dataset.fov_arcmin,
-                "cutout_fov_arcmin": dataset.cutout_fov_arcmin,
-                "bandpass": dataset.bandpass,
-                "spectral_band": spectral_band.to_dict(),
-                **settings,
-                "aligned": True,
-                "mode": mode,
-                "cache_hit": dataset.cache_hit,
-                "available_frame_count": dataset.frame_count,
-                "selected_frame_count": len(frames),
-                "source_observation_count": dataset.source_observation_count,
-                "band_observation_count": dataset.band_observation_count,
-                "discovery_ms": round((monotonic() - started) * 1000, 1),
-                "prefetch": prefetch,
-                "frames": frames,
-            }
-        )
+    def _health(self, light: bool = False) -> None:
+        engines = REGISTRY.list()
+        default = engines[-1]["id"] if engines else None
+        settings = None
+        if default and not light:  # light: healthcheck do container, sem esperar o motor
+            try:
+                worker = ENGINES.worker(default)
+                worker.ensure()
+                settings = worker.catalog
+            except RuntimeError as error:
+                self.log_error("Motor padrão indisponível: %s", error)
+        self._send_json({
+            "status": "ok",
+            "service": "spherex-lab",
+            "version": VERSION,
+            "engines": engines,
+            "default_engine": default,
+            "current_code": {"hash": REGISTRY.current_hash, "frozen": REGISTRY.has_current_code()},
+            "settings": settings,
+            "auth": AUTH.required,
+        })
 
-    def _discover_composite(self) -> None:
-        payload = self._read_json()
-        ra_deg = float(payload["ra_deg"])
-        dec_deg = float(payload["dec_deg"])
-        mode = str(payload.get("mode", "fast"))
-        refresh = bool(payload.get("refresh", False))
-        requested = payload.get("bandpasses")
-        if not isinstance(requested, list) or not requested:
-            raise ValueError("Selecione pelo menos uma banda espectral.")
-        requested_names = [str(value) for value in requested]
-        if len(set(requested_names)) != len(requested_names):
-            raise ValueError("A seleção contém bandas repetidas.")
-        if len(requested_names) > len(SPHEREX_BANDS):
-            raise ValueError("A seleção excede as seis bandas SPHEREx.")
-        bandpasses = [get_spherex_band(name).bandpass for name in requested_names]
-        output = str(payload.get("output", "image"))
-        if output not in OUTPUTS:
-            raise ValueError(f"Saída inválida. Use uma de: {', '.join(OUTPUTS)}.")
-        if output == "spectrum":
-            # Espectro usa todas as observações e recortes pequenos próprios;
-            # FOV, amostragem e renderização de imagem não se aplicam.
-            theme = str(payload.get("theme", "dark"))
-            job = SPECTRUM_JOBS.start(ra_deg, dec_deg, bandpasses, theme)
-            self._send_json(
-                {
-                    "output": "spectrum",
-                    "ra_deg": ra_deg,
-                    "dec_deg": dec_deg,
-                    "bandpasses": bandpasses,
-                    "bands": [get_spherex_band(name).to_dict() for name in bandpasses],
-                    "job": job,
-                }
-            )
+    def _engines(self, method: str, rest: list[str]) -> None:
+        if method == "GET" and not rest:
+            self._send_json({"engines": REGISTRY.list(), "current_code_hash": REGISTRY.current_hash})
+        elif method == "POST" and not rest:
+            payload = self._read_json()
+            self._send_json(REGISTRY.create(str(payload.get("title", "")), str(payload.get("description", ""))),
+                            HTTPStatus.CREATED)
+        elif method == "PATCH" and len(rest) == 1:
+            payload = self._read_json()
+            self._send_json(REGISTRY.update(
+                rest[0],
+                title=payload.get("title"),
+                description=payload.get("description"),
+            ))
+        else:
+            self._send_error(HTTPStatus.NOT_FOUND, "Endpoint não encontrado.")
+
+    def _engine_id(self, query: dict[str, str]) -> str:
+        engine_id = query.get("engine") or REGISTRY.default_id()
+        REGISTRY.get(engine_id)
+        return engine_id
+
+    def _records(self, method: str, rest: list[str], query: dict[str, str]) -> None:
+        if method == "GET" and not rest:
+            engine_id = self._engine_id(query)
+            scan = ENGINES.index(engine_id).scan()
+            records = [{**record, "coverage": coverage_for(record, engine_id, scan)} for record in RECORDS.list()]
+            self._send_json({"engine_id": engine_id, "records": records, "queue": QUEUE.snapshot()})
             return
-        settings = parse_render_settings(payload)
-        started = monotonic()
-
-        def band_service(bandpass: str) -> SpherexTemporalSequenceService:
-            return service_for(bandpass, settings["fov_arcmin"], settings["sampling"])
-
-        def discover(bandpass: str) -> tuple[str, Any]:
-            service = band_service(bandpass)
-            dataset = service.discover_dataset(
-                ra_deg=ra_deg,
-                dec_deg=dec_deg,
-                output_directory=CACHE_ROOT,
-                use_cache=not refresh,
+        if method == "POST" and not rest:
+            payload = self._read_json()
+            record = RECORDS.upsert(
+                payload.get("ra_deg"),
+                payload.get("dec_deg"),
+                name=payload.get("name"),
+                description=payload.get("description"),
+                query=payload.get("query"),
             )
-            return bandpass, dataset
-
-        with ThreadPoolExecutor(max_workers=len(bandpasses)) as executor:
-            discovered = executor.map(discover, bandpasses)
-        datasets = dict(discovered)
-
-        anchor_bandpass = bandpasses[0]
-        anchor_dataset = datasets[anchor_bandpass]
-        anchor_service = band_service(anchor_bandpass)
-        anchor_indices = anchor_service.select_indices(anchor_dataset, mode)
-        selected_by_band: dict[str, set[int]] = {
-            bandpass: set() for bandpass in bandpasses
-        }
-        timeline = []
-        for position, anchor_index in enumerate(anchor_indices):
-            anchor_observation = anchor_dataset.observations[anchor_index]
-            anchor_time = _observation_time(anchor_observation)
-            layers = []
-            for bandpass in bandpasses:
-                dataset = datasets[bandpass]
-                if bandpass == anchor_bandpass:
-                    observation_index = anchor_index
-                else:
-                    observation_index = min(
-                        range(dataset.frame_count),
-                        key=lambda index: abs(
-                            (
-                                _observation_time(dataset.observations[index])
-                                - anchor_time
-                            ).total_seconds()
-                        ),
-                    )
-                selected_by_band[bandpass].add(observation_index)
-                observation = dataset.observations[observation_index]
-                delta_seconds = (
-                    _observation_time(observation) - anchor_time
-                ).total_seconds()
-                layers.append(
-                    {
-                        "bandpass": bandpass,
-                        "dataset_request_id": dataset.request_id,
-                        "observation_index": observation_index,
-                        "observation_id": observation.observation_id,
-                        "observed_at": observation.observed_at,
-                        "delta_seconds": delta_seconds,
-                    }
-                )
-            timeline.append(
-                {
-                    "position": position,
-                    "anchor_bandpass": anchor_bandpass,
-                    "anchor_observation_id": anchor_observation.observation_id,
-                    "observed_at": anchor_observation.observed_at,
-                    "gap_from_previous_seconds": _timeline_gap(
-                        timeline,
-                        anchor_time,
-                    ),
-                    "layers": layers,
-                }
-            )
-
-        jobs = {}
-        dataset_summaries = []
-        for bandpass in bandpasses:
-            service = band_service(bandpass)
-            dataset = datasets[bandpass]
-            indices = sorted(selected_by_band[bandpass])
-            jobs[bandpass] = PREFETCH_JOBS.start(
-                service,
-                dataset,
-                indices,
-                mode,
-                render_profile=settings["render_profile"],
-                color_mode=settings["color_mode"],
-            )
-            dataset_summaries.append(
-                {
-                    "bandpass": bandpass,
-                    "request_id": dataset.request_id,
-                    "cache_hit": dataset.cache_hit,
-                    "available_frame_count": dataset.frame_count,
-                    "selected_frame_count": len(indices),
-                }
-            )
-
-        composite_key = ":".join(
-            [
-                "image",
-                mode,
-                settings["render_profile"],
-                settings["color_mode"],
-                *(datasets[name].request_id for name in bandpasses),
-            ]
-        )
-        self._send_json(
-            {
-                "output": "image",
-                "request_id": sha256(composite_key.encode("utf-8")).hexdigest()[:16],
-                "ra_deg": ra_deg,
-                "dec_deg": dec_deg,
-                "fov_arcmin": anchor_dataset.fov_arcmin,
-                "cutout_fov_arcmin": anchor_dataset.cutout_fov_arcmin,
-                "pixel_scale_arcsec": anchor_dataset.pixel_scale_arcsec,
-                "grid_pixels": _grid_pixels(
-                    anchor_dataset.fov_arcmin, anchor_dataset.pixel_scale_arcsec
-                ),
-                **settings,
-                "bandpasses": bandpasses,
-                "bands": [get_spherex_band(name).to_dict() for name in bandpasses],
-                "anchor_bandpass": anchor_bandpass,
-                "aligned": True,
-                "mode": mode,
-                "timeline_count": len(timeline),
-                "discovery_ms": round((monotonic() - started) * 1000, 1),
-                "datasets": dataset_summaries,
-                "prefetch": jobs,
-                "frames": timeline,
-            }
-        )
-
-    def _materialize_frame(self, request_id: str, observation_index: int) -> None:
-        started = monotonic()
-        dataset = DEFAULT_SERVICE.load_dataset(CACHE_ROOT, request_id)
-        service = service_for_dataset(dataset)
-        query = parse_qs(urlparse(self.path).query)
-        settings = parse_render_settings(
-            {
-                "fov_arcmin": dataset.fov_arcmin,
-                "render_profile": query.get("profile", [DEFAULT_RENDER_PROFILE])[0],
-                "color_mode": query.get("color", ["color"])[0],
-            }
-        )
-        result = service.materialize_frame(
-            dataset=dataset,
-            observation_index=observation_index,
-            output_directory=CACHE_ROOT,
-            render_profile=settings["render_profile"],
-            color_mode=settings["color_mode"],
-        )
-        data = result.to_dict()
-        data["image_url"] = (
-            f"/cache/{request_id}/{result.relative_path}?v={FRAME_CACHE_VERSION}"
-        )
-        data["elapsed_ms"] = round((monotonic() - started) * 1000, 1)
-        self._send_json(data)
-
-    def _serve_cached_frame(self, url_path: str) -> None:
-        parts = url_path.strip("/").split("/", maxsplit=2)
-        if len(parts) != 3:
-            self._send_error_json(HTTPStatus.NOT_FOUND, "Frame não encontrado.")
+            self._send_json(record)
             return
-        _, request_id, relative = parts
-        try:
-            dataset_directory = DEFAULT_SERVICE._cache_target(CACHE_ROOT, request_id)
-        except ValueError as error:
-            self._send_error_json(HTTPStatus.BAD_REQUEST, str(error))
+        if not rest:
+            self._send_error(HTTPStatus.METHOD_NOT_ALLOWED, "Método não permitido.")
             return
-        target = (dataset_directory / unquote(relative)).resolve()
-        if (
-            not target.is_relative_to(dataset_directory)
-            or target.suffix.lower() not in {".webp", ".svg"}
-            or not target.is_file()
-        ):
-            self._send_error_json(HTTPStatus.NOT_FOUND, "Frame não encontrado.")
+        record_id = rest[0]
+        if method == "GET" and len(rest) == 1:
+            engine_id = self._engine_id(query)
+            record = RECORDS.get(record_id)
+            self._send_json({**record, "coverage": coverage_for(record, engine_id)})
+        elif method == "PATCH" and len(rest) == 1:
+            payload = self._read_json()
+            self._send_json(RECORDS.update(
+                record_id, name=payload.get("name"), description=payload.get("description")
+            ))
+        elif method == "DELETE" and len(rest) == 1:
+            engine_id = self._engine_id(query)
+            if QUEUE.is_busy(record_id):
+                raise RuntimeError("Cancele o mapeamento deste registro antes de apagá-lo.")
+            record = RECORDS.get(record_id)
+            removed = purge_record_cache(record, engine_id)
+            forgotten = query.get("forget") == "1"
+            if forgotten:
+                RECORDS.delete(record_id)
+            else:
+                RECORDS.clear_mapping(record_id, engine_id)
+            self._send_json({"removed_datasets": removed, "forgotten": forgotten, "engine_id": engine_id})
+        elif method == "POST" and rest[1:] == ["map"]:
+            engine_id = self._engine_id(query)
+            RECORDS.get(record_id)
+            plan = validate_plan(self._read_json())
+            self._send_json(QUEUE.enqueue(record_id, engine_id, plan), HTTPStatus.ACCEPTED)
+        elif method == "DELETE" and rest[1:] == ["map"]:
+            QUEUE.cancel(record_id, self._engine_id(query))
+            self._send_json({"cancelled": True})
+        elif method == "POST" and rest[1:] == ["export"]:
+            engine_id = self._engine_id(query)
+            if QUEUE.is_busy(record_id):
+                raise RuntimeError("Aguarde o mapeamento terminar para exportar.")
+            self._send_json(export_for(record_id, engine_id))
+        else:
+            self._send_error(HTTPStatus.NOT_FOUND, "Endpoint não encontrado.")
+
+    def _proxy(self, method: str, engine_id: str, rest: str, raw_query: str) -> None:
+        REGISTRY.get(engine_id)
+        allowed = (
+            (method == "POST" and rest in {"datasets", "composites"})
+            or (method == "POST" and rest.startswith("datasets/"))
+            or (method == "GET" and rest.split("/")[0] in {"prefetch", "spectra"})
+            or (method == "DELETE" and rest.startswith("cache/"))
+        )
+        if not allowed:
+            self._send_error(HTTPStatus.NOT_FOUND, "Endpoint do motor não encontrado.")
             return
-        self._send_file(target, cache_control="public, max-age=31536000, immutable")
+        if method == "DELETE" and QUEUE.snapshot()["current"]:
+            # Apagar um dataset no meio de um mapeamento corromperia o lote.
+            raise RuntimeError("Há um mapeamento em andamento; tente de novo quando ele terminar.")
+        body = self._read_body() if method == "POST" else None
+        path = f"/api/{rest}" + (f"?{raw_query}" if raw_query else "")
+        status, content = ENGINES.worker(engine_id).raw(method, path, body)
+        # URLs de arquivos do motor ganham o prefixo da versão.
+        content = content.replace(b'"/cache/', f'"/cache/{engine_id}/'.encode())
+        self._send_bytes(status, content, "application/json; charset=utf-8", "no-store")
+
+    # --------------------------------------------------------- arquivos
+
+    def _serve_cache(self, parts: list[str]) -> None:
+        if len(parts) < 3:
+            self._send_error(HTTPStatus.NOT_FOUND, "Arquivo não encontrado.")
+            return
+        root = REGISTRY.cache_dir(parts[0]).resolve()
+        target = (root / "/".join(parts[1:])).resolve()
+        if not target.is_relative_to(root) or target.suffix.lower() not in {".webp", ".svg"}:
+            self._send_error(HTTPStatus.NOT_FOUND, "Arquivo não encontrado.")
+            return
+        self._send_file(target, "public, max-age=31536000, immutable")
+
+    def _serve_export(self, parts: list[str]) -> None:
+        root = (DATA_ROOT / "exports").resolve()
+        target = (root / "/".join(parts)).resolve()
+        if not target.is_relative_to(root) or target.suffix.lower() not in {".webp", ".svg", ".json"}:
+            self._send_error(HTTPStatus.NOT_FOUND, "Arquivo não encontrado.")
+            return
+        self._send_file(target, "no-cache")
 
     def _serve_public(self, url_path: str) -> None:
         relative = "index.html" if url_path == "/" else unquote(url_path.lstrip("/"))
         target = (PUBLIC_ROOT / relative).resolve()
-        if not target.is_relative_to(PUBLIC_ROOT) or not target.is_file():
-            self._send_error_json(HTTPStatus.NOT_FOUND, "Arquivo não encontrado.")
+        if not target.is_relative_to(PUBLIC_ROOT):
+            self._send_error(HTTPStatus.NOT_FOUND, "Arquivo não encontrado.")
             return
-        self._send_file(target, cache_control="no-cache")
+        self._send_file(target, "no-cache")
 
-    def _send_file(self, path: Path, *, cache_control: str) -> None:
-        content = path.read_bytes()
+    def _send_file(self, path: Path, cache_control: str) -> None:
+        if not path.is_file():
+            self._send_error(HTTPStatus.NOT_FOUND, "Arquivo não encontrado.")
+            return
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        self.send_response(HTTPStatus.OK)
+        if content_type.startswith("text/") or content_type in {"application/javascript", "application/json"}:
+            content_type += "; charset=utf-8"
+        self._send_bytes(HTTPStatus.OK, path.read_bytes(), content_type, cache_control)
+
+    # ------------------------------------------------------------ helpers
+
+    def _read_body(self) -> bytes:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length < 0 or length > 64 * 1024:
+            raise ValueError("Corpo da requisição muito grande.")
+        return self.rfile.read(length) if length else b""
+
+    def _read_json(self) -> dict[str, Any]:
+        body = self._read_body()
+        data = json.loads(body.decode("utf-8")) if body else {}
+        if not isinstance(data, dict):
+            raise ValueError("JSON deve ser um objeto.")
+        return data
+
+    def _send_json(self, data: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
+        content = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self._send_bytes(status, content, "application/json; charset=utf-8", "no-store")
+
+    def _send_error(self, status: HTTPStatus, message: str) -> None:
+        self._send_json({"error": message}, status)
+
+    def _send_bytes(self, status: int, content: bytes, content_type: str, cache_control: str) -> None:
+        if status >= 400:
+            # O corpo da requisição pode não ter sido lido: não reutiliza a conexão.
+            self.close_connection = True
+        self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
         self.send_header("Cache-Control", cache_control)
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(content)
-
-    def _read_json(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length", "0"))
-        if length <= 0 or length > 64 * 1024:
-            raise ValueError("Corpo JSON ausente ou muito grande.")
-        return json.loads(self.rfile.read(length).decode("utf-8"))
-
-    def _send_json(self, data: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
-        content = json.dumps(data, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(content)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(content)
-
-    def _send_error_json(
-        self,
-        status: HTTPStatus,
-        message: str,
-        details: dict[str, Any] | None = None,
-    ) -> None:
-        self._send_json(
-            {"error": message, "details": details or {}},
-            status=status,
-        )
-
-
-def _observation_time(observation: Any) -> datetime:
-    if not observation.observed_at:
-        raise ValueError("Observação sem data não pode compor a linha temporal.")
-    return datetime.fromisoformat(observation.observed_at)
-
-
-def _timeline_gap(timeline: list[dict[str, Any]], current: datetime) -> float | None:
-    if not timeline:
-        return None
-    previous = datetime.fromisoformat(str(timeline[-1]["observed_at"]))
-    return (current - previous).total_seconds()
 
 
 def parse_args() -> argparse.Namespace:
@@ -796,23 +892,26 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    global REGISTRY, ENGINES, RECORDS, QUEUE, AUTH
     args = parse_args()
-    CACHE_ROOT.mkdir(parents=True, exist_ok=True)
-    Thread(
-        target=lambda: print(
-            f"Calibrações WCS-WAVE aprendidas do cache: {SPECTRUM_SERVICE.seed_calibrations(CACHE_ROOT)}"
-        ),
-        name="spherex-seed-calibrations",
-        daemon=True,
-    ).start()
-    server = ThreadingHTTPServer((args.host, args.port), TemporalLabHandler)
-    print(f"SPHEREx Temporal Lab: http://{args.host}:{args.port}")
-    print(f"Cache: {CACHE_ROOT}")
+    DATA_ROOT.mkdir(parents=True, exist_ok=True)
+    AUTH = BasicAuth(DATA_ROOT, os.environ.get("SPHEREX_LAB_AUTH") == "required")
+    REGISTRY = EngineRegistry(DATA_ROOT, PROJECT_ROOT, VERSION)
+    REGISTRY.ensure_initial(Path(LEGACY_CACHE).expanduser() if LEGACY_CACHE else None)
+    ENGINES = EngineManager(REGISTRY)
+    RECORDS = RecordStore(DATA_ROOT)
+    QUEUE = MappingQueue(RECORDS, ENGINES)
+    QUEUE.recover()
+    Thread(target=lambda: ENGINES.worker(REGISTRY.default_id()).ensure(), daemon=True).start()
+    server = ThreadingHTTPServer((args.host, args.port), LabHandler)
+    server.daemon_threads = True
+    print(f"SPHEREx Lab: http://{args.host}:{args.port} · dados {DATA_ROOT}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nEncerrando laboratório.")
     finally:
+        ENGINES.stop()
         server.server_close()
 
 
