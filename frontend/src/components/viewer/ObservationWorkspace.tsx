@@ -248,6 +248,8 @@ function ObservationWorkspace({ query, targetSlug = null }: ObservationWorkspace
           onNewer={timeline.goToNewer}
           onOlder={timeline.goToOlder}
           onTogglePlay={timeline.togglePlay}
+          playbackRate={timeline.playbackRate}
+          onPlaybackRate={timeline.setPlaybackRate}
         />
       </div>
 

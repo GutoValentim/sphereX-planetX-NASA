@@ -1,4 +1,5 @@
 import { ChevronLeftIcon, ChevronRightIcon, PauseIcon, PlayIcon } from '../common/icons';
+import { TIMELINE_SPEEDS, type TimelineSpeed } from '../../hooks/useTimeline';
 import type { ObservationFrame } from '../../types/observation';
 import { formatUtcDateTime } from '../../utils/dateFormatting';
 import styles from './TimelinePlayer.module.css';
@@ -16,6 +17,8 @@ interface TimelinePlayerProps {
   onNewer: () => void;
   onOlder: () => void;
   onTogglePlay: () => void;
+  playbackRate: TimelineSpeed;
+  onPlaybackRate: (rate: TimelineSpeed) => void;
   className?: string;
 }
 
@@ -36,6 +39,8 @@ function TimelinePlayer({
   onNewer,
   onOlder,
   onTogglePlay,
+  playbackRate,
+  onPlaybackRate,
   className,
 }: TimelinePlayerProps) {
   const rootClassName = [styles.timeline, className].filter(Boolean).join(' ');
@@ -104,6 +109,20 @@ function TimelinePlayer({
         >
           <ChevronRightIcon />
         </button>
+
+        <label className={styles.speed}>
+          <span className="visually-hidden">Playback speed</span>
+          <select
+            value={playbackRate}
+            onChange={(event) => onPlaybackRate(Number(event.target.value) as TimelineSpeed)}
+          >
+            {TIMELINE_SPEEDS.map((speed) => (
+              <option key={speed} value={speed}>
+                {speed === 1 || speed === 2 ? `${speed.toFixed(1)}x` : `${speed}x`}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <div className={styles.sliderGroup}>
           <label htmlFor="timeline-slider" className="visually-hidden">
