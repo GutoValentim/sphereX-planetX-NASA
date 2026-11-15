@@ -21,8 +21,10 @@ export const UI_FEATURES = {
   skyTargetList: true,
   /** Image page: "Mapped targets" tab in the side panel (MappedTargetsPanel). */
   viewerTargetsTab: true,
-  /** Search coordinates page: quick list of mapped targets that open the image page (KnownTargets). */
+  /** Search coordinates page: "Mapped targets" tab whose entries fill in the form (KnownTargets). */
   exploreTargetsList: true,
+  /** Search / sky map / image pages: switch between "Search coordinates" and "Sky map" (ExploreModeSwitch). */
+  exploreModeSwitch: true,
   /** Image page: spectrum as rendered charts, combined + one per band, like the lab (SpectrumGallery). */
   spectrumGallery: true,
 } as const;

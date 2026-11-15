@@ -99,12 +99,12 @@ void main() {
 }`;
 
 const DEG_TO_RAD = Math.PI / 180;
-const INITIAL_FOV = 75 * DEG_TO_RAD;
+const INITIAL_FOV = 120 * DEG_TO_RAD;
 /**
- * Start (and "Recenter") view: galactic lon 207.59°, lat −15.60°, FOV 75°.
+ * Start (and "Recenter") view: galactic lon 354.27°, lat −20.10°, FOV 120°.
  * The readout's longitude is −yaw and its latitude is the pitch.
  */
-const HOME_VIEW = { yaw: -207.59 * DEG_TO_RAD, pitch: -15.6 * DEG_TO_RAD, fov: INITIAL_FOV };
+const HOME_VIEW = { yaw: -354.27 * DEG_TO_RAD, pitch: -20.1 * DEG_TO_RAD, fov: INITIAL_FOV };
 const MIN_FOV = (2 * Math.PI) / 180;
 const MAX_FOV = (120 * Math.PI) / 180;
 const PITCH_LIMIT = Math.PI / 2 - 0.001;

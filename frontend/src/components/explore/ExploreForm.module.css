@@ -1,4 +1,6 @@
 .form {
+  /* Leaves room for the sticky header and the "filled from target" notice when scrolled to. */
+  scroll-margin-top: calc(var(--header-height) + 5rem);
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
@@ -133,4 +135,25 @@
   font-weight: var(--font-weight-semibold);
   color: var(--color-danger);
   text-align: center;
+}
+
+/* Brief highlight after a mapped target fills the form. */
+@media (prefers-reduced-motion: no-preference) {
+  .form[data-filled] {
+    animation: form-filled 1.2s var(--easing-standard);
+  }
+}
+
+@keyframes form-filled {
+  0% {
+    box-shadow:
+      0 0 0 3px var(--color-focus),
+      var(--shadow-md);
+  }
+
+  100% {
+    box-shadow:
+      0 0 0 0 transparent,
+      var(--shadow-md);
+  }
 }
