@@ -1,7 +1,9 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import '@fontsource-variable/montserrat';
-import '@fontsource-variable/manrope';
+import '@fontsource-variable/inter';
+import '@fontsource-variable/public-sans';
+import '@fontsource/dm-mono/400.css';
+import '@fontsource/dm-mono/500.css';
 import './styles/variables.css';
 import './styles/themes.css';
 import './styles/globals.css';

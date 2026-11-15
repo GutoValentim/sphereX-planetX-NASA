@@ -3,86 +3,146 @@
  * instead of raw color values, so the palette can change in one place.
  * Selectors are scoped to :root because third-party widgets (e.g. Aladin Lite)
  * set their own data-theme attribute on inner elements.
+ * See docs/DESIGN_SYSTEM.md for usage rules and contrast notes.
  */
 :root,
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --color-text: #1c1c1c;
-  --color-background: #e0eeee;
-  --color-surface: #f5f5f5;
-  --color-primary: #b03060;
-  --color-on-primary: #ffffff;
-  --color-chrome: #87cefa;
-  --color-on-chrome: #1c1c1c;
-  --color-accent: #483d8b;
-  --color-danger: #b3261e;
+  --color-page: #f4f7fb;
+  --color-surface: #ffffff;
+  --color-surface-muted: #eaf0f6;
+  --color-surface-raised: #ffffff;
 
-  --color-text-muted: color-mix(in srgb, var(--color-text) 70%, transparent);
-  --color-border: color-mix(in srgb, var(--color-text) 15%, transparent);
-  --color-primary-hover: color-mix(in srgb, var(--color-primary) 85%, black);
-  --color-focus: var(--color-accent);
+  --color-text-primary: #152238;
+  --color-text-secondary: #526174;
+  --color-text-muted: #69788b;
+
+  --color-border: #d7e0ea;
+  /* Boundaries of interactive controls; meets 3:1 non-text contrast on surfaces. */
+  --color-border-strong: #77879c;
+
+  --color-brand: #0b3d91;
+  --color-on-brand: #ffffff;
+  --color-interactive: #105bd8;
+  --color-interactive-hover: #0b4ab5;
+  --color-action: #c83e32;
+  --color-action-hover: #a83228;
+  --color-on-action: #ffffff;
+  --color-focus: #105bd8;
+
+  --color-success: #17732f;
+  --color-warning: #8a5a00;
+  --color-error: #b42318;
+  --color-info: #105bd8;
+
   --color-field-background: #ffffff;
-  --color-field-border: color-mix(in srgb, var(--color-text) 30%, transparent);
-  --shadow-color: rgb(28 28 28 / 12%);
+  --shadow-color: rgb(21 34 56 / 8%);
 
-  /* Home hero: daylight sky with sunlight from the upper right. */
-  --color-on-hero: #1c1c1c;
-  --hero-sky: linear-gradient(180deg, #5fb8f2 0%, #9fd6f8 45%, var(--color-background) 100%);
+  /* Scientific chart palette: independent of UI roles so data colors never imply UI meaning. */
+  --chart-series-1: #1f5fad;
+  --chart-series-2: #c25e00;
+  --chart-series-3: #2e7d32;
+  --chart-series-4: #7b3fa0;
+
+  /* Home hero (redesigned in Phase 3): daylight sky with sunlight from the upper right. */
+  --color-on-hero: var(--color-text-primary);
+  --hero-sky: linear-gradient(180deg, #5fb8f2 0%, #9fd6f8 45%, var(--color-page) 100%);
   --hero-glow:
     radial-gradient(circle at 85% 8%, rgb(255 246 222 / 90%) 0, rgb(255 246 222 / 0%) 34%),
     radial-gradient(ellipse at 15% 30%, rgb(255 255 255 / 35%) 0, rgb(255 255 255 / 0%) 40%);
   /* Keeps dark text readable over a user-provided photograph. */
   --hero-photo-overlay: linear-gradient(
     180deg,
-    rgb(224 238 238 / 45%) 0%,
-    rgb(224 238 238 / 60%) 65%,
-    var(--color-background) 100%
+    rgb(244 247 251 / 45%) 0%,
+    rgb(244 247 251 / 60%) 65%,
+    var(--color-page) 100%
   );
 }
 
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --color-text: #f8f8ff;
-  --color-background: #1c1c1c;
-  --color-surface: #24364d;
-  /* DarkOrchid instead of MediumOrchid (#ba55d3) to keep white button text at WCAG AA contrast. */
-  --color-primary: #9932cc;
-  --color-on-primary: #ffffff;
-  --color-chrome: #191970;
-  --color-on-chrome: #f8f8ff;
-  --color-accent: #ffa54f;
-  --color-danger: #ff8a80;
+  --color-page: #0b1220;
+  --color-surface: #111c2e;
+  --color-surface-muted: #17263b;
+  --color-surface-raised: #1c2d44;
 
-  --color-text-muted: color-mix(in srgb, var(--color-text) 72%, transparent);
-  --color-border: color-mix(in srgb, var(--color-text) 18%, transparent);
-  --color-primary-hover: color-mix(in srgb, var(--color-primary) 85%, white);
-  --color-focus: var(--color-accent);
-  --color-field-background: color-mix(in srgb, var(--color-surface) 70%, black);
-  --color-field-border: color-mix(in srgb, var(--color-text) 30%, transparent);
-  --shadow-color: rgb(0 0 0 / 40%);
+  --color-text-primary: #f3f6fb;
+  --color-text-secondary: #b7c4d6;
+  --color-text-muted: #91a2b8;
 
-  /* Home hero: deep space with faint nebula glows. */
-  --color-on-hero: #f8f8ff;
-  --hero-sky: linear-gradient(180deg, #070a18 0%, #121449 55%, var(--color-background) 100%);
+  --color-border: #2a3b52;
+  --color-border-strong: #617796;
+
+  --color-brand: #75a7ff;
+  --color-on-brand: #0b1220;
+  --color-interactive: #75a7ff;
+  --color-interactive-hover: #a3c4ff;
+  --color-action: #ff8178;
+  --color-action-hover: #ffa39c;
+  /* White on #FF8178 is ~2.4:1, so the dark theme uses dark text on actions (~7.7:1). */
+  --color-on-action: #0b1220;
+  --color-focus: #75a7ff;
+
+  --color-success: #5fd08b;
+  --color-warning: #f2b84b;
+  --color-error: #ff8a80;
+  --color-info: #75a7ff;
+
+  --color-field-background: #0b1220;
+  --shadow-color: rgb(0 0 0 / 35%);
+
+  --chart-series-1: #7fb2ff;
+  --chart-series-2: #ffb35c;
+  --chart-series-3: #7bd389;
+  --chart-series-4: #c59bea;
+
+  /* Home hero (redesigned in Phase 3): deep space with faint nebula glows. */
+  --color-on-hero: var(--color-text-primary);
+  --hero-sky: linear-gradient(180deg, #070a18 0%, #0f1d3a 55%, var(--color-page) 100%);
   --hero-glow:
-    radial-gradient(ellipse at 18% 20%, rgb(72 61 139 / 55%) 0, rgb(72 61 139 / 0%) 45%),
-    radial-gradient(ellipse at 82% 35%, rgb(153 50 204 / 28%) 0, rgb(153 50 204 / 0%) 40%);
+    radial-gradient(ellipse at 18% 20%, rgb(11 61 145 / 45%) 0, rgb(11 61 145 / 0%) 45%),
+    radial-gradient(ellipse at 82% 35%, rgb(117 167 255 / 18%) 0, rgb(117 167 255 / 0%) 40%);
   /* Keeps light text readable over a user-provided photograph. */
   --hero-photo-overlay: linear-gradient(
     180deg,
-    rgb(7 10 24 / 40%) 0%,
-    rgb(7 10 24 / 60%) 65%,
-    var(--color-background) 100%
+    rgb(11 18 32 / 40%) 0%,
+    rgb(11 18 32 / 60%) 65%,
+    var(--color-page) 100%
   );
 }
 
+/* Derived tokens: computed from the role colors above, so they follow the active theme. */
 :root {
-  --shadow-sm: 0 1px 3px var(--shadow-color);
-  --shadow-md: 0 6px 20px var(--shadow-color);
+  --color-success-subtle: color-mix(in srgb, var(--color-success) 12%, transparent);
+  --color-warning-subtle: color-mix(in srgb, var(--color-warning) 14%, transparent);
+  --color-error-subtle: color-mix(in srgb, var(--color-error) 12%, transparent);
+  --color-info-subtle: color-mix(in srgb, var(--color-info) 12%, transparent);
+  --color-interactive-subtle: color-mix(in srgb, var(--color-interactive) 10%, transparent);
+
+  --chart-text: var(--color-text-secondary);
+  --chart-grid: var(--color-border);
+
+  --shadow-sm: 0 1px 2px var(--shadow-color);
+  --shadow-md: 0 4px 12px var(--shadow-color);
 
   /* The sky viewer stays dark in both themes, like the night sky it displays. */
   --color-viewer-background: #0b1020;
-  --color-on-viewer: #f8f8ff;
+  --color-on-viewer: #f3f6fb;
+
+  /*
+   * Legacy aliases used by pages not yet migrated (Phase 2 removes them).
+   * New code must use the role tokens above.
+   */
+  --color-text: var(--color-text-primary);
+  --color-background: var(--color-page);
+  --color-primary: var(--color-action);
+  --color-primary-hover: var(--color-action-hover);
+  --color-on-primary: var(--color-on-action);
+  --color-accent: var(--color-interactive);
+  --color-danger: var(--color-error);
+  --color-chrome: var(--color-surface);
+  --color-on-chrome: var(--color-text-primary);
+  --color-field-border: var(--color-border-strong);
 }

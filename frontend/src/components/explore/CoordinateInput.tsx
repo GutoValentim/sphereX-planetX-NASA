@@ -26,7 +26,12 @@ function CoordinateInput({
   hint,
   error,
 }: CoordinateInputProps) {
-  const inputClassName = [fieldStyles.input, unit && fieldStyles.withSuffix, error && fieldStyles.invalid]
+  const inputClassName = [
+    fieldStyles.input,
+    fieldStyles.data,
+    unit && fieldStyles.withSuffix,
+    error && fieldStyles.invalid,
+  ]
     .filter(Boolean)
     .join(' ');
 

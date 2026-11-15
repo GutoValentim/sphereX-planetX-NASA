@@ -35,19 +35,21 @@ function resolveColorTokens(container: HTMLElement, names: readonly string[]): s
 }
 
 function readThemeLayout(container: HTMLElement): Partial<Layout> {
-  const [text, gridColor, primary, accent] = resolveColorTokens(container, [
-    '--color-text',
-    '--color-border',
-    '--color-primary',
-    '--color-accent',
+  const [text, gridColor, ...series] = resolveColorTokens(container, [
+    '--chart-text',
+    '--chart-grid',
+    '--chart-series-1',
+    '--chart-series-2',
+    '--chart-series-3',
+    '--chart-series-4',
   ]);
-  const fontFamily = getComputedStyle(document.documentElement).getPropertyValue('--font-body').trim();
+  const fontFamily = getComputedStyle(document.documentElement).getPropertyValue('--font-ui').trim();
 
   return {
     paper_bgcolor: 'transparent',
     plot_bgcolor: 'transparent',
     font: { family: fontFamily, color: text },
-    colorway: [primary, accent],
+    colorway: series,
     xaxis: { gridcolor: gridColor, zerolinecolor: gridColor },
     yaxis: { gridcolor: gridColor, zerolinecolor: gridColor },
     margin: { t: 32, r: 16, b: 48, l: 56 },
