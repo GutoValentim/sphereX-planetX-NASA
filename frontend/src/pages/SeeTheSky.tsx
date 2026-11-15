@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ButtonLink from '../components/common/ButtonLink';
 import EmptyState from '../components/common/EmptyState';
@@ -19,13 +19,6 @@ function SeeTheSky() {
   const catalog = useCatalog();
   const targetName = catalog.targets.find((entry) => entry.slug === targetSlug)?.name;
   const title = targetName ?? 'SPHEREx Image';
-
-  useEffect(() => {
-    document.documentElement.dataset.page = 'viewer';
-    return () => {
-      delete document.documentElement.dataset.page;
-    };
-  }, []);
 
   const fromSkyMap = searchParams.get('entry') === VIEWER_ENTRY_MAP;
   const exploreTarget: RouteTarget = fromSkyMap

@@ -2,16 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ObservationFrame } from '../types/observation';
 import { formatUtcDateTime } from '../utils/dateFormatting';
 
-/** 1× plays two frames per second. The other rates scale this interval. */
-const BASE_INTERVAL_MS = 500;
-
-export const TIMELINE_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
-
-export type TimelineSpeed = (typeof TIMELINE_SPEEDS)[number];
+const DEFAULT_INTERVAL_MS = 1500;
 
 interface UseTimelineOptions {
   /** Requested ISO date (YYYY-MM-DD); the first frame on that date is selected initially. */
   preferredDate?: string | null;
+  intervalMs?: number;
 }
 
 function sortNewestFirst(frames: readonly ObservationFrame[]): ObservationFrame[] {
@@ -30,9 +26,7 @@ function findPreferredIndex(frames: readonly ObservationFrame[], preferredDate?:
  * Playback stops on the oldest frame; playing again restarts from the newest.
  */
 export function useTimeline(frames: readonly ObservationFrame[], options: UseTimelineOptions = {}) {
-  const { preferredDate } = options;
-  const [playbackRate, setPlaybackRate] = useState<TimelineSpeed>(1);
-  const intervalMs = BASE_INTERVAL_MS / playbackRate;
+  const { preferredDate, intervalMs = DEFAULT_INTERVAL_MS } = options;
 
   const sortedFrames = useMemo(() => sortNewestFirst(frames), [frames]);
   const lastIndex = sortedFrames.length - 1;
@@ -98,8 +92,6 @@ export function useTimeline(frames: readonly ObservationFrame[], options: UseTim
     canPlay,
     canGoNewer: activeIndex > 0,
     canGoOlder: activeIndex < lastIndex,
-    playbackRate,
-    setPlaybackRate,
     goTo,
     goToNewer,
     goToOlder,

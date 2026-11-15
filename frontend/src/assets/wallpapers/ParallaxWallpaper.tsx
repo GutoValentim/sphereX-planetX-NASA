@@ -66,6 +66,7 @@ function ParallaxWallpaper() {
   }, []);
 
   return (
+    <>
     <div ref={sectionRef} className="secao-parallax" aria-hidden="true">
       <div className="secao-parallax__layer">
         <img className="secao-parallax__image secao-parallax__image--sky" src={skyWallpaper} alt="" />
@@ -76,11 +77,6 @@ function ParallaxWallpaper() {
         />
       </div>
     </div>
-  );
-}
-
-export function WallpaperClouds() {
-  return (
     <div className="clouds" aria-hidden="true">
       {CLOUDS.map((cloud) => (
         <img
@@ -99,6 +95,7 @@ export function WallpaperClouds() {
         />
       ))}
     </div>
+    </>
   );
 }
 

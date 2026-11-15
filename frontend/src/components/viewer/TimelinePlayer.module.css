@@ -92,18 +92,6 @@
   background-color: var(--color-primary-hover);
 }
 
-.speed select {
-  height: 2.75rem;
-  padding: 0 var(--space-2);
-  font-family: var(--font-ui);
-  font-size: var(--font-size-sm);
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text);
-  background-color: var(--color-field-background);
-  border: var(--border-width) solid var(--color-field-border);
-  border-radius: var(--radius-md);
-}
-
 .sliderGroup {
   flex: 1;
   min-width: 0;

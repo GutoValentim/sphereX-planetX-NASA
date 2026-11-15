@@ -1,5 +1,5 @@
+import { SPHEREX_TRAJECTORY_GIF } from '../../constants/homeMedia';
 import { SPHEREX_SECTION } from '../../constants/homeContent';
-import { SPHEREX_TRAJECTORY_VIDEO } from '../../constants/homeMedia';
 import HomePanel from './HomePanel';
 import styles from './SpherexSection.module.css';
 
@@ -17,19 +17,14 @@ function SpherexSection() {
           ))}
         </div>
         <figure className={styles.figure}>
-          <video
-            className={styles.media}
-            controls
-            playsInline
-            preload="none"
-            poster={SPHEREX_TRAJECTORY_VIDEO.poster}
-          >
-            <source src={SPHEREX_TRAJECTORY_VIDEO.src} type="video/mp4" />
-          </video>
-          <figcaption className={styles.caption}>
-            This video provides an engaging visual overview of how the SPHEREx observatory maps the cosmos using
-            near-infrared light. Credit: NASA/JPL-Caltech.
-          </figcaption>
+          {SPHEREX_TRAJECTORY_GIF ? (
+            <img src={SPHEREX_TRAJECTORY_GIF} alt="Trajectory of the SPHEREx satellite" className={styles.media} />
+          ) : (
+            <div className={styles.slot} role="img" aria-label="Space reserved for the SPHEREx trajectory animation">
+              <span className={styles.slotLabel}>Trajectory animation</span>
+              <span className={styles.slotHint}>A GIF of the satellite’s path will be placed here.</span>
+            </div>
+          )}
         </figure>
       </div>
     </HomePanel>

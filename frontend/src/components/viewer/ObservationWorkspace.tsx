@@ -252,22 +252,6 @@ function ObservationWorkspace({ query, targetSlug = null }: ObservationWorkspace
           {viewMode === 'image' && <SavedImages onOpen={openSavedImage} variant="rail" />}
         </div>
 
-        <TimelinePlayer
-          className={styles.timeline}
-          frames={timeline.frames}
-          activeIndex={timeline.activeIndex}
-          isPlaying={timeline.isPlaying}
-          canPlay={timeline.canPlay}
-          canGoNewer={timeline.canGoNewer}
-          canGoOlder={timeline.canGoOlder}
-          isDemo={false}
-          onSelect={timeline.goTo}
-          onNewer={timeline.goToNewer}
-          onOlder={timeline.goToOlder}
-          onTogglePlay={timeline.togglePlay}
-          playbackRate={timeline.playbackRate}
-          onPlaybackRate={timeline.setPlaybackRate}
-        />
         <div className={styles.timeline} hidden={layout !== 'spherex'}>
           <TimelinePlayer
             frames={timeline.frames}
