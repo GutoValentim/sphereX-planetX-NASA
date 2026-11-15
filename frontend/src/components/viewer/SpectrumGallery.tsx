@@ -1,5 +1,5 @@
-import ErrorState from '../common/ErrorState';
-import LoadingState from '../common/LoadingState';
+import ArchiveUnavailable from './ArchiveUnavailable';
+import LoadProgress from './LoadProgress';
 import type { SpectrumGalleryData } from '../../utils/catalogMapping';
 import styles from './SpectrumGallery.module.css';
 
@@ -7,20 +7,28 @@ interface SpectrumGalleryProps {
   data: SpectrumGalleryData | null;
   loadingMessage?: string | null;
   errorMessage?: string | null;
+  /** Measured observations / total of a live spectrum job. */
+  progress?: { done: number; total: number };
+  onRetry?: () => void;
 }
 
 /**
  * Spectrum as charts rendered by the backend (same as the lab): every available band together,
- * then one chart per band. The band selection does not filter it.
+ * then one chart per band underneath. The band selection does not filter it.
  */
-function SpectrumGallery({ data, loadingMessage, errorMessage }: SpectrumGalleryProps) {
+function SpectrumGallery({ data, loadingMessage, errorMessage, progress, onRetry }: SpectrumGalleryProps) {
   if (!data || (!data.combinedUrl && data.bands.length === 0)) {
     return (
       <div className={styles.center}>
         {errorMessage ? (
-          <ErrorState title="Spectrum unavailable" message={errorMessage} />
+          <ArchiveUnavailable tone="surface" detail={errorMessage} onRetry={onRetry} />
         ) : (
-          <LoadingState message={loadingMessage ?? 'Preparing the spectrum…'} />
+          <LoadProgress
+            label={loadingMessage ?? 'Preparing the spectrum…'}
+            done={progress?.done}
+            total={progress?.total}
+            detail={progress?.total ? `${progress.done} of ${progress.total} observations measured` : undefined}
+          />
         )}
       </div>
     );
@@ -31,7 +39,7 @@ function SpectrumGallery({ data, loadingMessage, errorMessage }: SpectrumGallery
       <header className={styles.header}>
         <h2 className={styles.title}>Flux × wavelength</h2>
         <p className={styles.subtitle}>
-          Forced photometry on every SPHEREx observation of the target. All available bands, then each band.
+          Forced photometry on every SPHEREx observation of the target: all available bands, then each band.
         </p>
       </header>
       {data.combinedUrl && (

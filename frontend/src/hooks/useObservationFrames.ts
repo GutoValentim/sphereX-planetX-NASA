@@ -14,8 +14,10 @@ export function useObservationFrames(
   query: ObservationQuery,
   color: ImageColorMode = 'falsa',
   enabled = true,
+  /** Bumping it restarts the job (e.g. "Try again" after an archive error). */
+  attempt = 0,
 ): ObservationFrameSource {
-  const key = `${query.raDeg}:${query.decDeg}:${query.band}:${query.observationDate ?? ''}:${color}`;
+  const key = `${query.raDeg}:${query.decDeg}:${query.band}:${query.observationDate ?? ''}:${color}:${attempt}`;
   const start = useCallback((signal: AbortSignal) => startImageSequence(query, signal, color), [query, color]);
   const isDone = useCallback((snapshot: SequenceSnapshot) => !RUNNING.has(snapshot.status), []);
   const { snapshot, error } = usePolledJob<SequenceSnapshot>(key, enabled, start, isDone);

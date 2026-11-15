@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import ThemeSwitcher from '../common/ThemeSwitcher';
 import { ROUTES, type RouteTarget } from '../../routes/paths';
@@ -8,9 +9,11 @@ interface HeaderProps {
   title?: string;
   /** When provided, a back link to this route is shown. */
   backTo?: RouteTarget;
+  /** Page-specific navigation shown next to the theme switcher (e.g. exploration modes). */
+  nav?: ReactNode;
 }
 
-function Header({ title, backTo }: HeaderProps) {
+function Header({ title, backTo, nav }: HeaderProps) {
   return (
     <header className={styles.header}>
       <div className={styles.inner}>
@@ -28,6 +31,7 @@ function Header({ title, backTo }: HeaderProps) {
         {title && <h1 className={styles.title}>{title}</h1>}
 
         <div className={styles.end}>
+          {nav && <div className={styles.nav}>{nav}</div>}
           <ThemeSwitcher />
         </div>
       </div>

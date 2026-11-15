@@ -64,7 +64,9 @@ function ObservationMetadata({
           </div>
         ))}
       </dl>
-      <p className={styles.note}>Observation-specific details will be filled in by the backend response.</p>
+      <p className={styles.note}>
+        SPHEREx (NASA/IPAC IRSA) · false color by wavelength · aligned to a common grid, north up, target at the center.
+      </p>
     </section>
   );
 }

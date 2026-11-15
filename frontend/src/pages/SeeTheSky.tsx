@@ -45,12 +45,12 @@ function SeeTheSky() {
   }
 
   return (
-    <PageContainer title={title} backTo={exploreTarget}>
-      {UI_FEATURES.exploreModeSwitch && (
-        <div className={styles.modeRow}>
-          <ExploreModeSwitch coordinatesSearch={`?${toQueryParams(query)}`} />
-        </div>
-      )}
+    <PageContainer
+      title={title}
+      backTo={exploreTarget}
+      width="wide"
+      nav={UI_FEATURES.exploreModeSwitch && <ExploreModeSwitch coordinatesSearch={`?${toQueryParams(query)}`} />}
+    >
       <ObservationWorkspace key={searchParams.toString()} query={query} targetSlug={targetSlug} />
       <div className={styles.actions}>
         <ButtonLink to={exploreTarget} size="lg">
