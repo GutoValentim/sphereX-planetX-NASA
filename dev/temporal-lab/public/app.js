@@ -48,6 +48,12 @@ const elements = {
   fovOptions: document.querySelector("#fovOptions"),
   samplingOptions: document.querySelector("#samplingOptions"),
   applySettings: document.querySelector("#applySettingsButton"),
+  output: document.querySelector("#outputInput"),
+  spectrumPanel: document.querySelector("#spectrumPanel"),
+  spectrumProgress: document.querySelector("#spectrumProgress"),
+  spectrumCombined: document.querySelector("#spectrumCombined"),
+  spectrumCombinedImage: document.querySelector("#spectrumCombinedImage"),
+  spectrumBands: document.querySelector("#spectrumBands"),
 };
 
 const HISTORY_KEY = "spherex-temporal-history-v2";
@@ -284,6 +290,7 @@ function readHistory() {
       timeline_count: entry.timeline_count || entry.selected_frame_count || 0,
       fov_arcmin: entry.fov_arcmin || 30,
       sampling: entry.sampling || "native",
+      output: entry.output || "image",
     }));
   } catch (_) {
     return [];
@@ -301,7 +308,7 @@ function writeHistory(entries) {
 
 function historyId(entry) {
   const bands = [...(entry.bandpasses || ["SPHEREx-D3"])].sort().join("+");
-  return `${Number(entry.ra_deg).toFixed(9)}:${Number(entry.dec_deg).toFixed(9)}:${bands}:${entry.mode}:${entry.fov_arcmin || 30}:${entry.sampling || "native"}`;
+  return `${Number(entry.ra_deg).toFixed(9)}:${Number(entry.dec_deg).toFixed(9)}:${bands}:${entry.mode}:${entry.fov_arcmin || 30}:${entry.sampling || "native"}:${entry.output || "image"}`;
 }
 
 function modeLabel(mode) {
@@ -314,9 +321,10 @@ function saveToHistory(dataset) {
     dec_deg: dataset.dec_deg,
     bandpasses: dataset.bandpasses,
     mode: dataset.mode,
-    fov_arcmin: dataset.fov_arcmin,
-    sampling: dataset.sampling,
-    timeline_count: dataset.timeline_count,
+    fov_arcmin: dataset.fov_arcmin || state.settings.fov_arcmin,
+    sampling: dataset.sampling || state.settings.sampling,
+    output: dataset.output || "image",
+    timeline_count: dataset.timeline_count || 0,
     last_used_at: new Date().toISOString(),
   };
   const id = historyId(entry);
@@ -357,8 +365,12 @@ function renderHistory() {
     metadata.className = "history-meta";
     [
       `${(entry.bandpasses || ["SPHEREx-D3"]).map(shortBand).join(" + ")}`,
-      `${modeLabel(entry.mode)} · ${entry.timeline_count || 0} composições`,
-      `Janela ${arcmin(entry.fov_arcmin)} · ${(SAMPLING_TEXT[entry.sampling] || [entry.sampling])[0]}`,
+      ...(entry.output === "spectrum"
+        ? ["Espectro · todas as observações"]
+        : [
+          `${modeLabel(entry.mode)} · ${entry.timeline_count || 0} composições`,
+          `Janela ${arcmin(entry.fov_arcmin)} · ${(SAMPLING_TEXT[entry.sampling] || [entry.sampling])[0]}`,
+        ]),
       `Último acesso: ${new Date(entry.last_used_at).toLocaleString("pt-BR")}`,
     ].forEach((text) => {
       const item = document.createElement("span");
@@ -379,6 +391,8 @@ function renderHistory() {
       elements.mode.value = entry.mode;
       setSelectedBandpasses(entry.bandpasses || ["SPHEREx-D3"]);
       writeSettings({ fov_arcmin: entry.fov_arcmin, sampling: entry.sampling });
+      elements.output.value = entry.output || "image";
+      syncOutputControls();
       switchTab("explore");
       elements.form.requestSubmit();
     });
@@ -600,6 +614,7 @@ async function runComposite(query, { keepPosition = false } = {}) {
   elements.frameTimer.textContent = "aguardando…";
   elements.cacheStatus.textContent = "—";
   elements.prefetchProgress.textContent = "0 / 0";
+  elements.spectrumPanel.hidden = true;
   if (!keepPosition) {
     elements.viewer.hidden = true;
     elements.layers.replaceChildren();
@@ -668,13 +683,131 @@ elements.form.addEventListener("submit", async (event) => {
     setMessage("Selecione pelo menos uma banda espectral.", true);
     return;
   }
-  await runComposite({
+  const query = {
     ra_deg: Number(elements.ra.value),
     dec_deg: Number(elements.dec.value),
     bandpasses,
     mode: elements.mode.value,
-  });
+  };
+  if (elements.output.value === "spectrum") {
+    await runSpectrum(query);
+  } else {
+    await runComposite(query);
+  }
 });
+
+function syncOutputControls() {
+  const spectrum = elements.output.value === "spectrum";
+  elements.mode.disabled = spectrum;
+  elements.mode.title = spectrum ? "O espectro usa todas as observações disponíveis." : "";
+}
+
+function bandRangeText(band) {
+  return `${decimal(band.wavelength_min_um, 3)}–${decimal(band.wavelength_max_um, 3)} µm`;
+}
+
+function renderSpectrumProgress(bands, snapshot) {
+  elements.spectrumProgress.replaceChildren(...bands.map((band) => {
+    const chip = document.createElement("span");
+    const progress = snapshot?.progress?.[band.bandpass] || {};
+    const result = snapshot?.result?.bands.find((item) => item.bandpass === band.bandpass);
+    chip.className = `spectrum-chip${result ? (result.error ? " failed" : " done") : ""}`;
+    const swatch = document.createElement("i");
+    swatch.className = "color-swatch";
+    swatch.style.background = `rgb(${band.display_rgb.join(",")})`;
+    swatch.style.color = swatch.style.background;
+    const text = document.createElement("span");
+    if (result?.error) {
+      text.textContent = `${shortBand(band.bandpass)} · ${result.error}`;
+    } else if (result) {
+      const failed = Object.keys(result.failed || {}).length;
+      text.textContent = `${shortBand(band.bandpass)} · ${result.measured_count}/${result.observation_count} medidas`
+        + (failed ? ` · ${failed} falhas de rede` : "");
+    } else if (progress.total) {
+      text.textContent = `${shortBand(band.bandpass)} · ${progress.done}/${progress.total}`;
+    } else {
+      text.textContent = `${shortBand(band.bandpass)} · buscando observações…`;
+    }
+    chip.append(swatch, text);
+    return chip;
+  }));
+}
+
+function rejectionSummary(rejected) {
+  const counts = {};
+  Object.values(rejected || {}).forEach((reason) => { counts[reason] = (counts[reason] || 0) + 1; });
+  return Object.entries(counts).map(([reason, count]) => `${count}× ${reason}`).join(" · ");
+}
+
+function renderSpectrumResult(result) {
+  elements.spectrumCombinedImage.src = resourceUrl(result.combined_chart_url);
+  elements.spectrumCombined.hidden = false;
+  elements.spectrumBands.replaceChildren(...result.bands.filter((band) => band.chart_url).map((band) => {
+    const figure = document.createElement("figure");
+    figure.className = "spectrum-card";
+    const image = document.createElement("img");
+    image.src = resourceUrl(band.chart_url);
+    image.alt = `Espectro da banda ${shortBand(band.bandpass)} (${bandRangeText(band.band)})`;
+    image.loading = "lazy";
+    const caption = document.createElement("figcaption");
+    const rejected = rejectionSummary(band.rejected);
+    const failed = Object.keys(band.failed || {}).length;
+    caption.textContent = `${shortBand(band.bandpass)} · ${bandRangeText(band.band)} · `
+      + `${band.measured_count}/${band.observation_count} observações medidas`
+      + (rejected ? ` · descartadas: ${rejected}` : "")
+      + (failed ? ` · ${failed} falhas de rede (busque de novo para completar)` : "");
+    figure.append(image, caption);
+    return figure;
+  }));
+}
+
+async function runSpectrum(query) {
+  state.lastQuery = null;
+  const requestToken = ++state.requestToken;
+  setSearching(true, "Medindo espectro…");
+  elements.viewer.hidden = true;
+  elements.spectrumPanel.hidden = false;
+  elements.spectrumCombined.hidden = true;
+  elements.spectrumBands.replaceChildren();
+  elements.discoveryTimer.textContent = "—";
+  elements.frameTimer.textContent = "—";
+  elements.prefetchProgress.textContent = "—";
+  setMessage("Buscando observações e medindo o alvo em cada uma (recortes de 4′)…");
+  startTimer();
+  try {
+    const started = await api("/api/composites", {
+      method: "POST",
+      body: JSON.stringify({ ...query, output: "spectrum", theme: "dark" }),
+    });
+    saveToHistory({ ...started, mode: query.mode, output: "spectrum" });
+    let snapshot = started.job;
+    while (requestToken === state.requestToken) {
+      renderSpectrumProgress(started.bands, snapshot);
+      const totals = Object.values(snapshot.progress).reduce(
+        (sum, item) => ({ done: sum.done + (item.done || 0), total: sum.total + (item.total || 0) }),
+        { done: 0, total: 0 },
+      );
+      elements.prefetchProgress.textContent = `${totals.done} / ${totals.total}`;
+      if (snapshot.status === "completed") {
+        stopTimer();
+        renderSpectrumResult(snapshot.result);
+        const measured = snapshot.result.bands.reduce((sum, band) => sum + band.measured_count, 0);
+        setMessage(`Espectro pronto: ${measured} medições em ${started.bands.length} bandas (${seconds(snapshot.elapsed_ms)}).`);
+        return;
+      }
+      if (snapshot.status === "failed") throw new Error(snapshot.error || "Falha ao montar o espectro.");
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      snapshot = await api(`/api/spectra/${started.job.job_id}`);
+    }
+  } catch (error) {
+    if (requestToken === state.requestToken) {
+      stopTimer();
+      setMessage(error.message, true);
+    }
+  } finally {
+    if (requestToken === state.requestToken) setSearching(false);
+  }
+}
 
 elements.slider.addEventListener("input", () => updateFrameMetadata(Number(elements.slider.value)));
 elements.slider.addEventListener("change", () => showFrame(Number(elements.slider.value)).catch(() => {}));
@@ -683,6 +816,7 @@ elements.next.addEventListener("click", () => showFrame(Math.min(state.frames.le
 elements.exploreTabButton.addEventListener("click", () => switchTab("explore"));
 elements.historyTabButton.addEventListener("click", () => switchTab("history"));
 elements.settingsTabButton.addEventListener("click", () => switchTab("settings"));
+elements.output.addEventListener("change", syncOutputControls);
 elements.applySettings.addEventListener("click", () => {
   switchTab("explore");
   elements.form.requestSubmit();
@@ -744,4 +878,5 @@ api("/api/health")
   });
 
 renderSettings();
+syncOutputControls();
 renderHistory();

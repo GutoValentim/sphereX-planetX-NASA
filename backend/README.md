@@ -92,6 +92,16 @@ nebulosas, use `difusa`. Núcleos saturados (NaN cercados por pixels válidos, a
 primeiro frame é reutilizado em todas as épocas de cada variante
 (`perfil-cor`), então comparações temporais continuam válidas.
 
+### Espectro (`spectrum_service`, `spectrum_chart`)
+
+`SpherexSpectrumService.spectrum(ra_deg, dec_deg, bandpasses, output_directory)`
+mede o alvo em todas as observações das bandas pedidas (fotometria de abertura
+com fundo local, λ do `WCS-WAVE` no pixel do alvo, erro pela `VARIANCE`) e grava
+SVGs (`spectrum_chart.render_spectrum_svg`, sem matplotlib) com nome por hash de
+conteúdo. `IrsaClient.download_hdus` baixa o cutout só até a extensão pedida.
+Ainda não está exposto no FastAPI de produção; o laboratório usa
+`output: "spectrum"`.
+
 O FITS continua sendo a fonte científica. Os frames são derivados para exibição.
 Na comparação entre épocas, todos os frames devem usar o mesmo intervalo
 `display_min`/`display_max`; normalizar cada época separadamente pode criar uma

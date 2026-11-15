@@ -89,6 +89,13 @@
             </div>
           </fieldset>
           <label>
+            <span>Resultado</span>
+            <select id="outputInput" name="output">
+              <option value="image" selected>Imagem · sequência temporal</option>
+              <option value="spectrum">Espectro · todas as observações</option>
+            </select>
+          </label>
+          <label>
             <span>Estratégia temporal</span>
             <select id="modeInput" name="mode">
               <option value="fast" selected>Rápida · melhor bloco de até 4</option>
@@ -197,6 +204,26 @@
           <button class="step-button" id="nextButton" type="button" aria-label="Próximo frame">→</button>
         </div>
         <p class="slider-hint">Arraste livremente; frames ainda em processamento aparecem automaticamente assim que ficarem prontos.</p>
+        </section>
+
+        <section class="spectrum-panel" id="spectrumPanel" aria-labelledby="spectrum-title" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Espectro</p>
+              <h2 id="spectrum-title">Fluxo × comprimento de onda</h2>
+            </div>
+            <p class="fixed-config">recorte 4′ por observação · abertura 3 px · fundo local</p>
+          </div>
+          <div class="spectrum-progress" id="spectrumProgress"></div>
+          <figure class="spectrum-figure" id="spectrumCombined" hidden>
+            <img id="spectrumCombinedImage" alt="Espectro SPHEREx com as bandas selecionadas sobrepostas" />
+          </figure>
+          <div class="spectrum-grid" id="spectrumBands"></div>
+          <p class="spectrum-note">
+            Cada ponto é uma observação: o filtro do SPHEREx varia ao longo do detector, então o alvo cai
+            em um λ diferente a cada visita. A linha é a mediana por canal (17 por banda). Fontes com
+            movimento próprio alto (ex.: WISE 0855) saem da abertura ao longo dos meses.
+          </p>
         </section>
       </div>
 

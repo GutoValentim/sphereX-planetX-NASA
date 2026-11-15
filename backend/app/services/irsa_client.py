@@ -121,6 +121,50 @@ class IrsaClient:
 
         return destination
 
+    def download_hdus(
+        self,
+        observation: ObservationRecord,
+        output_directory: Path,
+        *,
+        cutout_center: tuple[float, float],
+        cutout_size_deg: float,
+        stop_after: str,
+        overwrite: bool = False,
+        max_bytes: int = DEFAULT_MAX_DOWNLOAD_BYTES,
+    ) -> Path:
+        """Baixa um cutout só até o fim da extensão ``stop_after`` e fecha a conexão.
+
+        Os cutouts SPHEREx trazem a tabela ``EPSF`` (~3,9 MB) antes do
+        ``WCS-WAVE``; para fotometria bastam IMAGE, FLAGS e VARIANCE (~30 KB).
+        O arquivo salvo é um FITS válido com as HDUs completas até ``stop_after``.
+        """
+
+        if not 0 < cutout_size_deg <= 1:
+            raise ValueError("cutout_size_deg deve estar no intervalo (0, 1].")
+        url = self._cutout_url(
+            self._validated_irsa_url(observation.access_url), cutout_center, cutout_size_deg
+        )
+        output_directory.mkdir(parents=True, exist_ok=True)
+        stem = Path(self._filename_for(url, True)).stem
+        destination = output_directory / f"{stem}-{stop_after.lower()}.fits"
+        if destination.exists() and not overwrite:
+            return destination
+
+        reader = _FitsPrefixReader(stop_after)
+        with self._get_with_retry(url) as response:
+            response.raise_for_status()
+            self._validated_irsa_url(response.url.split("?", maxsplit=1)[0])
+            for chunk in response.iter_content(chunk_size=16 * 1024):
+                if chunk and reader.feed(chunk):
+                    break
+                if reader.size > max_bytes:
+                    raise ValueError(f"Download excedeu o limite de {max_bytes} bytes.")
+        prefix = reader.prefix()
+        temporary = destination.with_suffix(".fits.part")
+        temporary.write_bytes(prefix)
+        temporary.replace(destination)
+        return destination
+
     @staticmethod
     def _get_with_retry(url: str, attempts: int = 3) -> requests.Response:
         transient_statuses = {429, 500, 502, 503, 504}
@@ -264,3 +308,72 @@ def _mjd_as_iso(row: object, column: str) -> str | None:
     if mjd is None:
         return None
     return Time(mjd, format="mjd").isot
+
+
+_FITS_BLOCK = 2880
+
+
+class _FitsPrefixReader:
+    """Acompanha um FITS em fluxo e detecta o fim de uma HDU pelo EXTNAME."""
+
+    def __init__(self, stop_after: str) -> None:
+        self.stop_after = stop_after.upper()
+        self.buffer = bytearray()
+        self.offset = 0  # início da próxima HDU ainda não analisada
+        self.end: int | None = None
+
+    @property
+    def size(self) -> int:
+        return len(self.buffer)
+
+    def feed(self, chunk: bytes) -> bool:
+        self.buffer.extend(chunk)
+        while self.end is None:
+            header = self._header_at(self.offset)
+            if header is None:
+                return False
+            header_size, cards = header
+            data_end = self.offset + header_size + _padded(_data_size(cards))
+            if cards.get("EXTNAME", "").upper() == self.stop_after:
+                self.end = data_end
+                break
+            self.offset = data_end
+        return self.end is not None and len(self.buffer) >= self.end
+
+    def prefix(self) -> bytes:
+        if self.end is None or len(self.buffer) < self.end:
+            raise ValueError(f"A extensão {self.stop_after} não foi encontrada no cutout.")
+        return bytes(self.buffer[: self.end])
+
+    def _header_at(self, start: int) -> tuple[int, dict[str, str]] | None:
+        cards: dict[str, str] = {}
+        position = start
+        while position + _FITS_BLOCK <= len(self.buffer):
+            block = bytes(self.buffer[position : position + _FITS_BLOCK]).decode("ascii", "replace")
+            position += _FITS_BLOCK
+            for index in range(0, _FITS_BLOCK, 80):
+                card = block[index : index + 80]
+                keyword = card[:8].strip()
+                if keyword == "END":
+                    return position - start, cards
+                if card[8:10] == "= " and keyword not in cards:
+                    value = card[10:].split("/", 1)[0].strip().strip("'").strip()
+                    cards[keyword] = value
+        return None
+
+
+def _data_size(cards: dict[str, str]) -> int:
+    naxis = int(cards.get("NAXIS", "0"))
+    if naxis == 0:
+        return 0
+    elements = 1
+    for axis in range(1, naxis + 1):
+        elements *= int(cards[f"NAXIS{axis}"])
+    bits = abs(int(cards["BITPIX"]))
+    pcount = int(cards.get("PCOUNT", "0"))
+    gcount = int(cards.get("GCOUNT", "1"))
+    return bits // 8 * gcount * (pcount + elements)
+
+
+def _padded(size: int) -> int:
+    return (size + _FITS_BLOCK - 1) // _FITS_BLOCK * _FITS_BLOCK

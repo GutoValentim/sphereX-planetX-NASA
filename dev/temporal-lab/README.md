@@ -31,6 +31,29 @@ SPHEREX_LAB_CACHE_DIR="/Users/caio/Documents/Dev/NASA/NSA SphereX/dev/results/te
   baixado é sempre 1,5× a janela. Amostragem nativa (6,15″/px) ou 2× interpolada
   (3,08″/px). FOV e amostragem mudam o dataset (novo download); o preset não.
 
+## Espectro (Resultado → Espectro)
+
+`POST /api/composites` aceita `output`: `"image"` (padrão, comportamento anterior)
+ou `"spectrum"`. No espectro a resposta traz um job (`GET /api/spectra/<id>`) com
+progresso por banda e, ao fim, URLs de SVG: um gráfico sobreposto e um por banda.
+
+- Não existe espectro pronto por observação: o filtro do SPHEREx varia ao longo
+  do detector, então cada visita mede o alvo em um único λ (`WCS-WAVE`). O
+  espectro é a fotometria forçada (abertura 3 px, fundo local 6–10 px) em todas
+  as observações D1–D6, com o λ do pixel do alvo.
+- Recortes de 4′ baixados só até a `VARIANCE` (~30 KB em vez de ~4 MB; a tabela
+  `EPSF` é descartada). A tabela `WCS-WAVE` é uma calibração por detector e fica
+  em `calibration/` por (detector, `[CALIB] spectral_wcs <uuid>`); calibração
+  nova faz um download completo uma vez. O lab aprende as calibrações dos
+  recortes já em cache ao iniciar.
+- Medições e rejeições ficam em `<dataset>/spectrum/photometry.json`: repetir a
+  coordenada só refaz gráficos; falhas de rede são refeitas na próxima busca.
+- Cores e legenda usam o mesmo `display_rgb` da falsa cor das imagens. Outliers
+  (5σ por MAD e 3× o erro em relação aos vizinhos em λ) aparecem vazados e não
+  entram na linha (mediana por canal, 17 por banda).
+- Alvos com movimento próprio alto (ex.: WISE 0855, ~8″/ano) saem da abertura;
+  propagar a posição por época fica para uma próxima etapa.
+
 ## Comportamento
 
 - consulta apenas metadados na primeira busca;

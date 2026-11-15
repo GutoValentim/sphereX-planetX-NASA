@@ -248,3 +248,13 @@ def _source_wavelength_map(
     if not np.isfinite(wavelength).any():
         return None
     return wavelength
+
+
+def source_wavelength_map(
+    hdus: fits.HDUList,
+    image_hdu: fits.ImageHDU,
+    shape: tuple[int, ...],
+) -> np.ndarray | None:
+    """Mapa λ (µm) por pixel na grade original do FITS, a partir do ``WCS-WAVE``."""
+
+    return _source_wavelength_map(hdus, image_hdu, shape)

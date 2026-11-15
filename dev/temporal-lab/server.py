@@ -45,6 +45,7 @@ from app.services.temporal_sequence_service import (  # noqa: E402
     SequenceLimitExceeded,
     SpherexTemporalSequenceService,
 )
+from app.services.spectrum_service import SpherexSpectrumService  # noqa: E402
 from app.services.spectral_color import (  # noqa: E402
     SPHEREX_BANDS,
     get_spherex_band,
@@ -323,6 +324,107 @@ class PrefetchJobManager:
 
 
 PREFETCH_JOBS = PrefetchJobManager()
+SPECTRUM_SERVICE = SpherexSpectrumService(download_workers=8)
+OUTPUTS = ("image", "spectrum")
+
+
+class SpectrumJobManager:
+    """Monta espectros em segundo plano e informa o progresso por banda."""
+
+    def __init__(self) -> None:
+        self._jobs: dict[str, dict[str, Any]] = {}
+        self._lock = Lock()
+
+    def start(self, ra_deg: float, dec_deg: float, bandpasses: list[str], theme: str) -> dict[str, Any]:
+        key = json.dumps([round(ra_deg, 9), round(dec_deg, 9), sorted(bandpasses), theme])
+        job_id = sha256(key.encode("utf-8")).hexdigest()[:16]
+        with self._lock:
+            existing = self._jobs.get(job_id)
+            if existing is not None and existing["status"] == "running":
+                return self.snapshot(job_id)
+            self._jobs[job_id] = {
+                "job_id": job_id,
+                "status": "running",
+                "started_at": monotonic(),
+                "finished_at": None,
+                "progress": {name: {"done": 0, "total": None} for name in bandpasses},
+                "result": None,
+                "error": None,
+            }
+        Thread(
+            target=self._run,
+            args=(job_id, ra_deg, dec_deg, bandpasses, theme),
+            name=f"spherex-spectrum-{job_id}",
+            daemon=True,
+        ).start()
+        return self.snapshot(job_id)
+
+    def snapshot(self, job_id: str) -> dict[str, Any]:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise FileNotFoundError(f"Espectro {job_id} não encontrado.")
+            elapsed = (job["finished_at"] or monotonic()) - job["started_at"]
+            data = {key: value for key, value in job.items() if key not in {"started_at", "finished_at"}}
+            data["progress"] = {name: dict(value) for name, value in job["progress"].items()}
+            data["elapsed_ms"] = round(elapsed * 1000, 1)
+            return data
+
+    def is_running(self) -> bool:
+        with self._lock:
+            return any(job["status"] == "running" for job in self._jobs.values())
+
+    def _run(self, job_id: str, ra_deg: float, dec_deg: float, bandpasses: list[str], theme: str) -> None:
+        def on_progress(bandpass: str, done: int, total: int) -> None:
+            with self._lock:
+                self._jobs[job_id]["progress"][bandpass] = {"done": done, "total": total}
+
+        try:
+            result = SPECTRUM_SERVICE.spectrum(
+                ra_deg=ra_deg,
+                dec_deg=dec_deg,
+                bandpasses=bandpasses,
+                output_directory=CACHE_ROOT,
+                theme=theme,
+                on_progress=on_progress,
+            )
+            summary = {
+                "ra_deg": result.ra_deg,
+                "dec_deg": result.dec_deg,
+                "combined_chart_url": _cache_url(result.combined_chart),
+                "bands": [
+                    {
+                        "bandpass": band.bandpass,
+                        "band": band.band,
+                        "chart_url": _cache_url(result.band_charts[band.bandpass])
+                        if band.bandpass in result.band_charts else None,
+                        "observation_count": band.observation_count,
+                        "measured_count": len(band.points),
+                        "rejected": band.rejected,
+                        "failed": band.failed,
+                        "outliers": list(band.outliers),
+                        "error": band.error,
+                        "points": [point.to_dict() for point in band.points],
+                    }
+                    for band in result.bands
+                ],
+            }
+            with self._lock:
+                self._jobs[job_id].update(status="completed", result=summary)
+        except Exception as error:  # laboratório: torna a falha visível na interface
+            with self._lock:
+                self._jobs[job_id].update(status="failed", error=str(error))
+        finally:
+            with self._lock:
+                self._jobs[job_id]["finished_at"] = monotonic()
+
+
+def _cache_url(path: str) -> str:
+    relative = Path(path).resolve().relative_to(CACHE_ROOT.resolve())
+    return f"/cache/{relative.as_posix()}"
+
+
+SPECTRUM_JOBS = SpectrumJobManager()
 
 
 class TemporalLabHandler(BaseHTTPRequestHandler):
@@ -353,6 +455,12 @@ class TemporalLabHandler(BaseHTTPRequestHandler):
             )
             return
         parts = path.strip("/").split("/")
+        if len(parts) == 3 and parts[:2] == ["api", "spectra"]:
+            try:
+                self._send_json(SPECTRUM_JOBS.snapshot(parts[2]))
+            except FileNotFoundError as error:
+                self._send_error_json(HTTPStatus.NOT_FOUND, str(error))
+            return
         if len(parts) == 3 and parts[:2] == ["api", "prefetch"]:
             try:
                 self._send_json(PREFETCH_JOBS.get(parts[2]))
@@ -401,7 +509,7 @@ class TemporalLabHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             if path == "/api/cache":
-                if PREFETCH_JOBS.is_running():
+                if PREFETCH_JOBS.is_running() or SPECTRUM_JOBS.is_running():
                     self._send_error_json(
                         HTTPStatus.CONFLICT,
                         "Aguarde o pré-carregamento atual terminar antes de limpar o cache.",
@@ -512,6 +620,25 @@ class TemporalLabHandler(BaseHTTPRequestHandler):
         if len(requested_names) > len(SPHEREX_BANDS):
             raise ValueError("A seleção excede as seis bandas SPHEREx.")
         bandpasses = [get_spherex_band(name).bandpass for name in requested_names]
+        output = str(payload.get("output", "image"))
+        if output not in OUTPUTS:
+            raise ValueError(f"Saída inválida. Use uma de: {', '.join(OUTPUTS)}.")
+        if output == "spectrum":
+            # Espectro usa todas as observações e recortes pequenos próprios;
+            # FOV, amostragem e renderização de imagem não se aplicam.
+            theme = str(payload.get("theme", "dark"))
+            job = SPECTRUM_JOBS.start(ra_deg, dec_deg, bandpasses, theme)
+            self._send_json(
+                {
+                    "output": "spectrum",
+                    "ra_deg": ra_deg,
+                    "dec_deg": dec_deg,
+                    "bandpasses": bandpasses,
+                    "bands": [get_spherex_band(name).to_dict() for name in bandpasses],
+                    "job": job,
+                }
+            )
+            return
         settings = parse_render_settings(payload)
         started = monotonic()
 
@@ -613,6 +740,7 @@ class TemporalLabHandler(BaseHTTPRequestHandler):
 
         composite_key = ":".join(
             [
+                "image",
                 mode,
                 settings["render_profile"],
                 settings["color_mode"],
@@ -621,6 +749,7 @@ class TemporalLabHandler(BaseHTTPRequestHandler):
         )
         self._send_json(
             {
+                "output": "image",
                 "request_id": sha256(composite_key.encode("utf-8")).hexdigest()[:16],
                 "ra_deg": ra_deg,
                 "dec_deg": dec_deg,
@@ -684,7 +813,7 @@ class TemporalLabHandler(BaseHTTPRequestHandler):
         target = (dataset_directory / unquote(relative)).resolve()
         if (
             not target.is_relative_to(dataset_directory)
-            or target.suffix.lower() != ".webp"
+            or target.suffix.lower() not in {".webp", ".svg"}
             or not target.is_file()
         ):
             self._send_error_json(HTTPStatus.NOT_FOUND, "Frame não encontrado.")
@@ -759,6 +888,13 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+    Thread(
+        target=lambda: print(
+            f"Calibrações WCS-WAVE aprendidas do cache: {SPECTRUM_SERVICE.seed_calibrations(CACHE_ROOT)}"
+        ),
+        name="spherex-seed-calibrations",
+        daemon=True,
+    ).start()
     server = ThreadingHTTPServer((args.host, args.port), TemporalLabHandler)
     print(f"SPHEREx Temporal Lab: http://{args.host}:{args.port}")
     print(f"Cache: {CACHE_ROOT}")
