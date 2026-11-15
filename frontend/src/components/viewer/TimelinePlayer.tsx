@@ -5,7 +5,7 @@ import { formatUtcDateTime } from '../../utils/dateFormatting';
 import styles from './TimelinePlayer.module.css';
 
 interface TimelinePlayerProps {
-  /** Frames ordered from newest (index 0) to oldest. */
+  /** Frames ordered from oldest (index 0) to newest. */
   frames: readonly ObservationFrame[];
   activeIndex: number;
   isPlaying: boolean;
@@ -52,7 +52,7 @@ function TimelinePlayer({
           Observation timeline
         </h2>
         <p className={styles.empty}>
-          No observations loaded yet. Observations will be listed here from newest to oldest once the backend
+          No observations loaded yet. Observations will be listed here from oldest to newest once the backend
           provides them.
         </p>
       </section>
@@ -82,10 +82,10 @@ function TimelinePlayer({
         <button
           type="button"
           className={styles.controlButton}
-          onClick={onNewer}
-          disabled={!canGoNewer}
-          aria-label="Newer observation"
-          title="Newer observation"
+          onClick={onOlder}
+          disabled={!canGoOlder}
+          aria-label="Older observation"
+          title="Older observation"
         >
           <ChevronLeftIcon />
         </button>
@@ -102,10 +102,10 @@ function TimelinePlayer({
         <button
           type="button"
           className={styles.controlButton}
-          onClick={onOlder}
-          disabled={!canGoOlder}
-          aria-label="Older observation"
-          title="Older observation"
+          onClick={onNewer}
+          disabled={!canGoNewer}
+          aria-label="Newer observation"
+          title="Newer observation"
         >
           <ChevronRightIcon />
         </button>
@@ -141,8 +141,8 @@ function TimelinePlayer({
             onChange={(event) => onSelect(Number(event.target.value))}
           />
           <div className={styles.sliderLabels} aria-hidden="true">
-            <span>Newest</span>
             <span>Oldest</span>
+            <span>Newest</span>
           </div>
         </div>
       </div>

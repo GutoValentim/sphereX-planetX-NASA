@@ -109,6 +109,16 @@ export function MonitorIcon(props: IconProps) {
   );
 }
 
+/** Default person mark used when a team member has no portrait. */
+export function UserIcon(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <circle cx="12" cy="8" r="3.25" />
+      <path d="M5.5 19.25v-.9A4.35 4.35 0 0 1 9.85 14h4.3a4.35 4.35 0 0 1 4.35 4.35v.9" />
+    </svg>
+  );
+}
+
 export function MoonIcon(props: IconProps) {
   return (
     <svg {...baseProps} {...props}>

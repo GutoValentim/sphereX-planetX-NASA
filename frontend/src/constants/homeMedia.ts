@@ -1,8 +1,18 @@
+import caioPhoto from '../assets/images/photos/caioFoto.jpeg';
+import gustavoPhoto from '../assets/images/photos/foto-gustavo.jpeg';
+import michaelPhoto from '../assets/images/photos/michaelFoto.jpeg';
+
 /**
  * Drop-in media for the Home page. A missing file keeps the reserved slot empty.
  * Trajectory: src/assets/home/spherex-trajectory.gif (png and webp also work).
  * Portrait:   src/assets/team/<member id>.jpg (png and webp also work).
+ * Named photos below take precedence over that folder.
  */
+const portraitsById: Readonly<Record<string, string>> = {
+  'caio-sejour': caioPhoto,
+  'gustavo-valentim': gustavoPhoto,
+  'michael-reis': michaelPhoto,
+};
 const trajectoryFiles = import.meta.glob<string>('../assets/home/spherex-trajectory.{gif,png,webp}', {
   eager: true,
   query: '?url',
@@ -28,6 +38,9 @@ export const SPHEREX_TRAJECTORY_VIDEO = {
 } as const;
 
 export function teamPortrait(memberId: string): string | null {
+  const named = portraitsById[memberId];
+  if (named) return named;
+
   const match = Object.entries(portraitFiles).find(([path]) => {
     const fileName = path.split('/').pop() ?? '';
     const baseName = fileName.slice(0, fileName.lastIndexOf('.'));

@@ -1,0 +1,48 @@
+/*
+ * Opaque pixels of logo-tars-removebg-preview.png sit in a 500×500 canvas.
+ * The crop below keeps a margin so the contour is not clipped.
+ * Source window: x 30–469, y 166–333.
+ */
+.root {
+  --tars-crop-x: 30;
+  --tars-crop-y: 166;
+  --tars-crop-width: 440;
+  --tars-crop-height: 168;
+  --tars-source: 500;
+
+  position: relative;
+  display: block;
+  height: var(--tars-logo-height, 2.25rem);
+  aspect-ratio: 440 / 168;
+  color: var(--color-brand);
+}
+
+.defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.crop {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.image {
+  position: absolute;
+  /* left/top percentages follow the crop box, so the mark lands inside the frame. */
+  left: calc(var(--tars-crop-x) / var(--tars-crop-width) * -100%);
+  top: calc(var(--tars-crop-y) / var(--tars-crop-height) * -100%);
+  width: calc(var(--tars-source) / var(--tars-crop-width) * 100%);
+  height: calc(var(--tars-source) / var(--tars-crop-height) * 100%);
+  max-width: none;
+  filter: var(--tars-filter);
+}
+
+:root[data-theme='dark'] .image {
+  filter: invert(1) var(--tars-filter);
+}

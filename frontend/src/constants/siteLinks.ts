@@ -6,6 +6,12 @@ export const FOOTER_LINKS: readonly ExternalLink[] = [
   { label: 'NASA Space Apps Challenge', href: 'https://www.spaceappschallenge.org/' },
 ];
 
+/** Official marks shown in the footer. Each one links to that organization's site. */
+export const FOOTER_PARTNERS: readonly ExternalLink[] = [
+  { label: 'NASA', href: 'https://www.nasa.gov/' },
+  { label: 'NASA Space Apps Challenge', href: 'https://www.spaceappschallenge.org/' },
+];
+
 /** Credits required by the third-party data and software shown in the viewer. */
 export const FOOTER_CREDITS: readonly string[] = [
   'Reference imagery: Digitized Sky Survey (STScI/NASA), colored and HEALPix-ed by CDS, served by NASA/IPAC IRSA.',

@@ -14,8 +14,8 @@ interface UseTimelineOptions {
   preferredDate?: string | null;
 }
 
-function sortNewestFirst(frames: readonly ObservationFrame[]): ObservationFrame[] {
-  return [...frames].sort((a, b) => Date.parse(b.observedAt) - Date.parse(a.observedAt));
+function sortOldestFirst(frames: readonly ObservationFrame[]): ObservationFrame[] {
+  return [...frames].sort((a, b) => Date.parse(a.observedAt) - Date.parse(b.observedAt));
 }
 
 function findPreferredIndex(frames: readonly ObservationFrame[], preferredDate?: string | null): number {
@@ -25,16 +25,16 @@ function findPreferredIndex(frames: readonly ObservationFrame[], preferredDate?:
 }
 
 /**
- * Temporal navigation over observations ordered from newest (index 0) to oldest.
+ * Temporal navigation over observations ordered from oldest (index 0) to newest.
  * The selection is stored by frame id, so it survives frames arriving or being re-sorted.
- * Playback stops on the oldest frame; playing again restarts from the newest.
+ * Playback stops on the newest frame; playing again restarts from the oldest.
  */
 export function useTimeline(frames: readonly ObservationFrame[], options: UseTimelineOptions = {}) {
   const { preferredDate } = options;
   const [playbackRate, setPlaybackRate] = useState<TimelineSpeed>(1);
   const intervalMs = BASE_INTERVAL_MS / playbackRate;
 
-  const sortedFrames = useMemo(() => sortNewestFirst(frames), [frames]);
+  const sortedFrames = useMemo(() => sortOldestFirst(frames), [frames]);
   const lastIndex = sortedFrames.length - 1;
 
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
@@ -61,8 +61,8 @@ export function useTimeline(frames: readonly ObservationFrame[], options: UseTim
     [selectIndex],
   );
 
-  const goToNewer = useCallback(() => goTo(activeIndex - 1), [activeIndex, goTo]);
-  const goToOlder = useCallback(() => goTo(activeIndex + 1), [activeIndex, goTo]);
+  const goToOlder = useCallback(() => goTo(activeIndex - 1), [activeIndex, goTo]);
+  const goToNewer = useCallback(() => goTo(activeIndex + 1), [activeIndex, goTo]);
 
   const canPlay = sortedFrames.length > 1;
 
@@ -96,8 +96,8 @@ export function useTimeline(frames: readonly ObservationFrame[], options: UseTim
     activeFrame,
     isPlaying,
     canPlay,
-    canGoNewer: activeIndex > 0,
-    canGoOlder: activeIndex < lastIndex,
+    canGoOlder: activeIndex > 0,
+    canGoNewer: activeIndex < lastIndex,
     playbackRate,
     setPlaybackRate,
     goTo,

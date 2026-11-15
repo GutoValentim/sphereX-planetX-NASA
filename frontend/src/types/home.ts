@@ -4,13 +4,18 @@ export interface HomeSectionCopy {
   paragraphs: readonly string[];
 }
 
-export type ExplorerFeatureExample = 'image' | 'chart';
-
-export interface ExplorerFeature {
+export interface ExplorationPath {
   id: string;
   title: string;
-  description: string;
-  example: ExplorerFeatureExample;
+  paragraphs: readonly string[];
+}
+
+export type VisualizationExample = 'spherex' | 'chart' | 'dss2';
+
+export interface VisualizationMethod {
+  id: VisualizationExample;
+  title: string;
+  paragraphs: readonly string[];
 }
 
 /** One person on the Home page. The list is shown in alphabetical order by name. */
@@ -19,4 +24,6 @@ export interface TeamMember {
   id: string;
   name: string;
   description: string;
+  /** Public profile, when the member has one. */
+  href?: string;
 }

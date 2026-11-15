@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import TarsLogo from '../common/TarsLogo';
 import ThemeSwitcher from '../common/ThemeSwitcher';
 import { ROUTES, type RouteTarget } from '../../routes/paths';
 import styles from './Header.module.css';
@@ -33,6 +34,7 @@ function Header({ title, backTo, nav }: HeaderProps) {
         <div className={styles.end}>
           {nav && <div className={styles.nav}>{nav}</div>}
           <ThemeSwitcher />
+          <TarsLogo className={styles.logo} />
         </div>
       </div>
     </header>
