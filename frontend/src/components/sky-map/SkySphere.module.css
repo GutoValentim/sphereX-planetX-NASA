@@ -220,7 +220,20 @@
   background-color: var(--color-page);
 }
 
-/* Slight blur hides the low resolution of the all-sky image (UI_FEATURES.skyBackgroundBlur). */
+/*
+ * Canvas filters compose through custom properties, so each flag stays independent:
+ * blur hides the low resolution of the all-sky image (UI_FEATURES.skyBackgroundBlur);
+ * dim darkens it so mapped targets stand out (UI_FEATURES.skyDarkBackground).
+ */
 .canvasSoft {
-  filter: blur(0.6px);
+  --sky-filter-blur: blur(0.6px);
+}
+
+.canvasDim {
+  --sky-filter-dim: brightness(0.42) saturate(0.85);
+}
+
+.canvasSoft,
+.canvasDim {
+  filter: var(--sky-filter-blur, ) var(--sky-filter-dim, );
 }

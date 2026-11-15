@@ -57,6 +57,7 @@ uniform vec3 uF, uR, uU;
 uniform float uFocal;
 uniform vec4 uEllipse;
 uniform float uGrid;
+uniform float uDotted;
 const float PI = 3.14159265359;
 
 void main() {
@@ -80,18 +81,30 @@ void main() {
 
   if (uGrid > 0.5) {
     float lonDeg = degrees(lon), latDeg = degrees(lat);
-    float w = degrees(2.0 / (uFocal * uRes.y)) * 0.8;
+    float px = degrees(2.0 / (uFocal * uRes.y));
+    float w = px * mix(0.8, 1.1, uDotted);
     float gLon = abs(fract(lonDeg / 30.0 + 0.5) - 0.5) * 30.0;
     float gLat = abs(fract(latDeg / 30.0 + 0.5) - 0.5) * 30.0;
-    float line = max(step(gLon * cos(lat), w), step(gLat, w));
-    float eq = step(abs(latDeg), w * 1.5);
-    col = mix(col, vec3(0.45, 0.8, 1.0), line * 0.35);
-    col = mix(col, vec3(1.0, 0.85, 0.3), eq * 0.6);
+    // Dotted mode: meridians are cut along latitude, parallels along longitude (~6 px period).
+    float alongMeridian = mix(1.0, step(fract(latDeg / (px * 6.0)), 0.4), uDotted);
+    float alongParallel = mix(1.0, step(fract(lonDeg * cos(lat) / (px * 6.0)), 0.4), uDotted);
+    float line = max(step(gLon * cos(lat), w) * alongMeridian, step(gLat, w) * alongParallel);
+    float alongEquator = mix(1.0, step(fract(lonDeg * cos(lat) / (px * 12.0)), 0.55), uDotted);
+    float eq = step(abs(latDeg), w * 1.5) * alongEquator;
+    // Dots cover less area than solid lines, so they are drawn stronger to read the same.
+    col = mix(col, vec3(0.45, 0.8, 1.0), line * mix(0.35, 0.75, uDotted));
+    col = mix(col, vec3(1.0, 0.85, 0.3), eq * mix(0.6, 0.9, uDotted));
   }
   gl_FragColor = vec4(col, 1.0);
 }`;
 
-const INITIAL_FOV = (75 * Math.PI) / 180;
+const DEG_TO_RAD = Math.PI / 180;
+const INITIAL_FOV = 75 * DEG_TO_RAD;
+/**
+ * Start (and "Recenter") view: galactic lon 207.59°, lat −15.60°, FOV 75°.
+ * The readout's longitude is −yaw and its latitude is the pitch.
+ */
+const HOME_VIEW = { yaw: -207.59 * DEG_TO_RAD, pitch: -15.6 * DEG_TO_RAD, fov: INITIAL_FOV };
 const MIN_FOV = (2 * Math.PI) / 180;
 const MAX_FOV = (120 * Math.PI) / 180;
 const PITCH_LIMIT = Math.PI / 2 - 0.001;
@@ -164,14 +177,16 @@ export class SkySphereRenderer {
     focal: WebGLUniformLocation | null;
     ellipse: WebGLUniformLocation | null;
     grid: WebGLUniformLocation | null;
+    dotted: WebGLUniformLocation | null;
   };
 
-  private readonly view = { yaw: 0, pitch: 0, fov: INITIAL_FOV };
+  private readonly view = { ...HOME_VIEW };
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private target: Vec3 | null = null;
   private pinchDistance = 0;
   private tap: { x: number; y: number } | null = null;
   private gridOn = false;
+  private gridDotted = false;
   private ready = false;
   private disposed = false;
   private pending = false;
@@ -212,16 +227,15 @@ export class SkySphereRenderer {
     image.src = url;
   }
 
-  setGrid(enabled: boolean): void {
+  setGrid(enabled: boolean, dotted = this.gridDotted): void {
     this.gridOn = enabled;
+    this.gridDotted = dotted;
     this.requestDraw();
   }
 
+  /** Animates back to the start view. */
   resetView(): void {
-    this.view.yaw = 0;
-    this.view.pitch = 0;
-    this.view.fov = INITIAL_FOV;
-    this.requestDraw();
+    this.animateTo(HOME_VIEW, 1200);
   }
 
   clearSelection(): void {
@@ -272,6 +286,12 @@ export class SkySphereRenderer {
     const { offset = { x: 0, y: 0 }, durationMs = 1400, onDone } = options;
     const finalFov = clamp(Math.min(this.view.fov, ((options.fovDeg ?? 30) * Math.PI) / 180), MIN_FOV, MAX_FOV);
     const end = this.solveView(world, finalFov, offset);
+    this.animateTo({ ...end, fov: finalFov }, durationMs, onDone);
+  }
+
+  /** Eased camera move (shortest way around in yaw, log-scale zoom). */
+  private animateTo(end: { yaw: number; pitch: number; fov: number }, durationMs: number, onDone?: () => void): void {
+    this.cancelFlight();
     const start = { ...this.view };
     const deltaYaw = wrapAngle(end.yaw - start.yaw);
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -284,7 +304,7 @@ export class SkySphereRenderer {
       const k = easeInOutCubic(t);
       this.view.yaw = start.yaw + deltaYaw * k;
       this.view.pitch = start.pitch + (end.pitch - start.pitch) * k;
-      this.view.fov = Math.exp(Math.log(start.fov) + (Math.log(finalFov) - Math.log(start.fov)) * k);
+      this.view.fov = Math.exp(Math.log(start.fov) + (Math.log(end.fov) - Math.log(start.fov)) * k);
       this.renderNow();
       if (t < 1) {
         this.flightId = window.requestAnimationFrame(step);
@@ -495,6 +515,7 @@ export class SkySphereRenderer {
       gl.uniform3fv(this.uniforms.up, up);
       gl.uniform1f(this.uniforms.focal, 1 / Math.tan(this.view.fov / 2));
       gl.uniform1f(this.uniforms.grid, this.gridOn ? 1 : 0);
+      gl.uniform1f(this.uniforms.dotted, this.gridDotted ? 1 : 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
 
@@ -565,6 +586,7 @@ export class SkySphereRenderer {
       focal: gl.getUniformLocation(program, 'uFocal'),
       ellipse: gl.getUniformLocation(program, 'uEllipse'),
       grid: gl.getUniformLocation(program, 'uGrid'),
+      dotted: gl.getUniformLocation(program, 'uDotted'),
     };
   }
 

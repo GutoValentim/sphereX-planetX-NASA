@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import Button from '../common/Button';
 import { buttonClassName } from '../common/buttonClassName';
 import ErrorState from '../common/ErrorState';
+import IconButton from '../common/IconButton';
+import { GridIcon, RecenterIcon } from '../common/icons';
 import LoadingState from '../common/LoadingState';
 import { DEFAULT_SPECTRAL_BAND, SPECTRAL_BANDS } from '../../constants/spectralBands';
 import { UI_FEATURES } from '../../constants/uiFeatures';
@@ -18,12 +20,22 @@ import styles from './SkySphere.module.css';
 const FLY_TO_OFFSET = { x: -0.12, y: -0.1 };
 const FLY_TO_FOV_DEG = 30;
 
+/** Listed in toolbar order; the first one is shown by default. */
 const SKY_MAPS = {
-  gas: { url: '/sky/spherex-allsky.jpg', label: 'Gas and dust' },
   stars: { url: '/sky/starlight-allsky.jpg', label: 'Stars' },
+  gas: { url: '/sky/spherex-allsky.jpg', label: 'Gas and dust' },
 } as const;
 
 type SkyMapId = keyof typeof SKY_MAPS;
+const DEFAULT_SKY_MAP: SkyMapId = 'stars';
+
+const CANVAS_CLASS = [
+  styles.canvas,
+  UI_FEATURES.skyBackgroundBlur && styles.canvasSoft,
+  UI_FEATURES.skyDarkBackground && styles.canvasDim,
+]
+  .filter(Boolean)
+  .join(' ');
 
 interface SkySphereProps {
   onOpenViewer: (selection: SkySelection) => void;
@@ -87,11 +99,11 @@ function SkySphere({ onOpenViewer, isOpeningViewer = false, targets = [], onOpen
   const fovRef = useRef<HTMLElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<SkySphereRenderer | null>(null);
-  const mapIdRef = useRef<SkyMapId>('gas');
+  const mapIdRef = useRef<SkyMapId>(DEFAULT_SKY_MAP);
   const gridRef = useRef(false);
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'unsupported'>('loading');
-  const [mapId, setMapId] = useState<SkyMapId>('gas');
+  const [mapId, setMapId] = useState<SkyMapId>(DEFAULT_SKY_MAP);
   const [gridOn, setGridOn] = useState(false);
   mapIdRef.current = mapId;
   gridRef.current = gridOn;
@@ -108,9 +120,15 @@ function SkySphere({ onOpenViewer, isOpeningViewer = false, targets = [], onOpen
     };
   }, []);
 
+  // Opening a mapped target closes the card of a point picked on the sky.
+  const clearSelection = useCallback(() => {
+    rendererRef.current?.clearSelection();
+  }, []);
+
   const flyToTarget = useCallback((entry: CatalogEntry) => {
     const renderer = rendererRef.current;
     if (!renderer) return;
+    renderer.clearSelection();
     renderer.flyTo(equatorialToWorldDirection(entry.ra_deg, entry.dec_deg), {
       offset: FLY_TO_OFFSET,
       fovDeg: FLY_TO_FOV_DEG,
@@ -143,7 +161,7 @@ function SkySphere({ onOpenViewer, isOpeningViewer = false, targets = [], onOpen
     }
 
     rendererRef.current = renderer;
-    renderer.setGrid(gridRef.current);
+    renderer.setGrid(gridRef.current, UI_FEATURES.skyGridDotted);
     renderer.load(SKY_MAPS[mapIdRef.current].url);
     const observer = new ResizeObserver(() => renderer.resize());
     if (stageRef.current) observer.observe(stageRef.current);
@@ -169,7 +187,7 @@ function SkySphere({ onOpenViewer, isOpeningViewer = false, targets = [], onOpen
     <div ref={stageRef} className={styles.stage}>
       <canvas
         ref={canvasRef}
-        className={UI_FEATURES.skyBackgroundBlur ? `${styles.canvas} ${styles.canvasSoft}` : styles.canvas}
+        className={CANVAS_CLASS}
         tabIndex={0}
         aria-label="All-sky sphere. Drag to look around, click to select a point. Arrow keys pan, plus and minus zoom."
       />
@@ -184,6 +202,7 @@ function SkySphere({ onOpenViewer, isOpeningViewer = false, targets = [], onOpen
           subscribeFrame={subscribeFrame}
           openRequest={openRequest}
           onOpenTarget={onOpenTarget}
+          onPin={clearSelection}
         />
       )}
       <div ref={setMarker} className={styles.marker}>
@@ -257,29 +276,27 @@ function SkySphere({ onOpenViewer, isOpeningViewer = false, targets = [], onOpen
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            className={buttonClassName({ variant: 'secondary', size: 'sm' })}
+          <IconButton
+            size="sm"
+            label="Galactic grid"
+            icon={<GridIcon />}
             aria-pressed={gridOn}
             onClick={() => {
               const next = !gridOn;
               setGridOn(next);
               rendererRef.current?.setGrid(next);
             }}
-          >
-            Galactic grid
-          </button>
-          <button
-            type="button"
-            className={buttonClassName({ variant: 'secondary', size: 'sm' })}
+          />
+          <IconButton
+            size="sm"
+            label="Recenter"
+            icon={<RecenterIcon />}
             onClick={() => rendererRef.current?.resetView()}
-          >
-            Recenter
-          </button>
+          />
+          <span ref={centerRef} className={`text-data ${styles.readout}`} />
           {UI_FEATURES.skyTargetList && targets.length > 0 && (
             <SkyTargetList targets={targets} onSelect={flyToTarget} />
           )}
-          <span ref={centerRef} className={`text-data ${styles.readout}`} />
         </div>
       )}
 

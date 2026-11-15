@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import Button from '../common/Button';
+import { UI_FEATURES } from '../../constants/uiFeatures';
 import type { CatalogEntry } from '../../services/catalog';
 import { formatTargetCoordinates } from '../../utils/catalogNavigation';
 import { equatorialToWorldDirection, type Vec3 } from '../../utils/galacticCoordinates';
@@ -22,6 +23,8 @@ interface SkyTargetMarkersProps {
   subscribeFrame: (listener: () => void) => () => void;
   openRequest: TargetOpenRequest | null;
   onOpenTarget: (entry: CatalogEntry) => void;
+  /** Called when a target card is pinned by a click (e.g. to close the selected-point card). */
+  onPin?: () => void;
 }
 
 /** Small deterministic PRNG, so each target keeps its size, tone and rhythm across renders. */
@@ -57,7 +60,7 @@ function markerStyle(id: string): CSSProperties {
  * Mapped targets drawn on the sky sphere as softly glowing, animated dots. Hovering (or focusing)
  * one shows its card; clicking pins the card. Positions follow the camera on every redraw.
  */
-function SkyTargetMarkers({ targets, rendererRef, subscribeFrame, openRequest, onOpenTarget }: SkyTargetMarkersProps) {
+function SkyTargetMarkers({ targets, rendererRef, subscribeFrame, openRequest, onOpenTarget, onPin }: SkyTargetMarkersProps) {
   const layerRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLElement>(null);
   const markerEls = useRef(new Map<string, HTMLButtonElement>());
@@ -162,13 +165,21 @@ function SkyTargetMarkers({ targets, rendererRef, subscribeFrame, openRequest, o
           onPointerEnter={() => hover(entry.id)}
           onPointerLeave={scheduleClose}
           onFocus={() => hover(entry.id)}
-          onClick={() => setActive({ id: entry.id, pinned: true })}
+          onClick={() => {
+            onPin?.();
+            setActive({ id: entry.id, pinned: true });
+          }}
           hidden
         >
           <span className={styles.halo} aria-hidden="true" />
           <span className={`${styles.orbit} ${styles.orbitA}`} aria-hidden="true" />
           <span className={`${styles.orbit} ${styles.orbitB}`} aria-hidden="true" />
           <span className={styles.core} aria-hidden="true" />
+          {UI_FEATURES.skyTargetLabels && (
+            <span className={styles.label} aria-hidden="true">
+              {entry.name}
+            </span>
+          )}
         </button>
       ))}
 

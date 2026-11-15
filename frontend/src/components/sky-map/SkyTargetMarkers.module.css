@@ -251,3 +251,32 @@
   font-size: var(--font-size-label);
   color: var(--color-text-secondary);
 }
+
+/* Target name above the dot (UI_FEATURES.skyTargetLabels). */
+.label {
+  position: absolute;
+  bottom: calc(100% + 0.45rem);
+  left: 50%;
+  max-width: 12rem;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-label);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  color: var(--color-on-viewer);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-shadow:
+    0 0 4px rgb(0 0 0 / 90%),
+    0 0 10px rgb(0 0 0 / 70%);
+  pointer-events: none;
+  opacity: 0.82;
+  transform: translateX(-50%);
+  transition: opacity var(--duration-fast) var(--easing-standard);
+}
+
+.target:hover .label,
+.target[data-active] .label {
+  opacity: 1;
+}

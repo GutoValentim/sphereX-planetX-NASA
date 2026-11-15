@@ -116,3 +116,25 @@ export function MoonIcon(props: IconProps) {
     </svg>
   );
 }
+
+/** Globe with meridian and equator: coordinate grid toggle. */
+export function GridIcon(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <ellipse cx="12" cy="12" rx="4" ry="9" />
+      <path d="M3 12h18M4.5 7.5h15M4.5 16.5h15" />
+    </svg>
+  );
+}
+
+/** Crosshair: recenter the view. */
+export function RecenterIcon(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props}>
+      <circle cx="12" cy="12" r="6.5" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+      <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
+    </svg>
+  );
+}
