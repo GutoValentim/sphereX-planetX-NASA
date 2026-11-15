@@ -1,0 +1,11 @@
+:root { font-family: system-ui, sans-serif; color: #e8edf5; background: #101b2e; font-synthesis: none; }
+body { margin: 0; }
+main { max-width: 780px; margin: 10vh auto; padding: 32px; }
+.eyebrow { color: #91badb; font-size: 12px; letter-spacing: .18em; }
+h1 { font-size: clamp(46px, 10vw, 84px); line-height: 1.05; letter-spacing: -.04em; }
+h1 span { color: #91badb; }
+p { line-height: 1.7; color: #bdcada; }
+section { border-top: 1px solid #344459; margin-top: 56px; padding-top: 24px; }
+h2 { font-size: 20px; }
+a { color: #a3d3ff; text-underline-offset: 4px; }
+a:focus-visible { outline: 2px solid #a3d3ff; outline-offset: 5px; }

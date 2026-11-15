@@ -1,0 +1,77 @@
+name: spherex
+
+x-runtime: &runtime
+  image: node:24-bookworm-slim
+  restart: unless-stopped
+  init: true
+  user: "1000:1000"
+  read_only: true
+  working_dir: /app
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 128
+  mem_limit: 256m
+  cpus: 0.5
+  networks: [web]
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  api:
+    <<: *runtime
+    command: ["node", "--env-file=/run/spherex-api.env", "--env-file=/app/.release.env", "backend/dist/api/server.js"]
+    volumes:
+      - ${SPHEREX_API_RELEASE_DIR:-/opt/docker/spherex/current-api}:/app:ro
+      - /opt/docker/spherex/api.env:/run/spherex-api.env:ro
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      FRONTEND_ORIGIN: https://${FRONTEND_DOMAIN:-spherex.prospectordigital.com.br}
+    healthcheck:
+      test: ["CMD", "node", "--env-file=/app/.release.env", "-e", "fetch('http://127.0.0.1:3000/healthz').then(async r=>{if(!r.ok||(await r.json()).version!==process.env.GIT_SHA)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: web
+      traefik.http.routers.spherex-api.rule: Host(`${API_DOMAIN:-api.spherex.prospectordigital.com.br}`)
+      traefik.http.routers.spherex-api.entrypoints: websecure
+      traefik.http.routers.spherex-api.tls: "true"
+      traefik.http.routers.spherex-api.tls.certresolver: lets-encrypt
+      traefik.http.routers.spherex-api.service: spherex-api
+      traefik.http.services.spherex-api.loadbalancer.server.port: "3000"
+
+  frontend:
+    <<: *runtime
+    command: ["node", "--env-file=/app/.release.env", "frontend/server.mjs"]
+    volumes:
+      - ${SPHEREX_FRONTEND_RELEASE_DIR:-/opt/docker/spherex/current-frontend}:/app:ro
+    environment:
+      NODE_ENV: production
+      PORT: "8080"
+    healthcheck:
+      test: ["CMD", "node", "--env-file=/app/.release.env", "-e", "fetch('http://127.0.0.1:8080/healthz').then(async r=>{if(!r.ok||(await r.json()).version!==process.env.GIT_SHA)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: web
+      traefik.http.routers.spherex-frontend.rule: Host(`${FRONTEND_DOMAIN:-spherex.prospectordigital.com.br}`)
+      traefik.http.routers.spherex-frontend.entrypoints: websecure
+      traefik.http.routers.spherex-frontend.tls: "true"
+      traefik.http.routers.spherex-frontend.tls.certresolver: lets-encrypt
+      traefik.http.routers.spherex-frontend.service: spherex-frontend
+      traefik.http.services.spherex-frontend.loadbalancer.server.port: "8080"
+
+networks:
+  web:
+    external: true
