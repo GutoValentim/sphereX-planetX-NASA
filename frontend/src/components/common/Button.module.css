@@ -69,3 +69,11 @@
 .fullWidth {
   width: 100%;
 }
+
+/* Pressed state is a border plus a tint, not color alone. */
+.button[aria-pressed='true'],
+.button[aria-pressed='true']:hover:not(:disabled) {
+  color: var(--color-interactive);
+  background-color: var(--color-interactive-subtle);
+  border-color: var(--color-interactive);
+}

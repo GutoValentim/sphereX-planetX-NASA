@@ -10,6 +10,7 @@ import ScrollToTop from './routes/ScrollToTop';
 
 /** The viewer page pulls in the sky viewer and chart integrations, so it is loaded on demand. */
 const SeeTheSky = lazy(() => import('./pages/SeeTheSky'));
+const ExploreMap = lazy(() => import('./pages/ExploreMap'));
 
 function App() {
   return (
@@ -25,6 +26,7 @@ function App() {
         <Routes>
           <Route path={ROUTES.home} element={<Home />} />
           <Route path={ROUTES.explore} element={<ExploreTheSky />} />
+          <Route path={ROUTES.sky} element={<ExploreMap />} />
           <Route path={ROUTES.viewer} element={<SeeTheSky />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
