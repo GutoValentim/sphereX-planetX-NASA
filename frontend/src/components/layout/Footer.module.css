@@ -59,6 +59,52 @@
   text-decoration-thickness: 2px;
 }
 
+.partners {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.partner {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: inherit;
+  text-decoration: none;
+}
+
+.partnerLogo {
+  display: block;
+  width: auto;
+  height: 3.25rem;
+  object-fit: contain;
+}
+
+.spaceAppsLogo {
+  height: 6rem;
+}
+
+/* The mark is black on a transparent field. Black ink becomes white on the dark footer; red stays red. */
+:root[data-theme='dark'] .spaceAppsLogo {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+.partnerLabel {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+.partner:hover .partnerLabel {
+  text-decoration-thickness: 2px;
+}
+
 .credits {
   padding-top: var(--space-4);
   font-size: var(--font-size-xs);

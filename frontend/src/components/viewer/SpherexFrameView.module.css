@@ -9,6 +9,24 @@
   background-color: #000;
 }
 
+.stage[data-zoomable='true'] {
+  cursor: grab;
+  touch-action: none;
+}
+
+.stage[data-grabbing='true'] {
+  cursor: grabbing;
+}
+
+.zoom {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  right: var(--space-3);
+  transform: translateY(-50%);
+  cursor: default;
+}
+
 .layers {
   position: relative;
   width: 100%;
