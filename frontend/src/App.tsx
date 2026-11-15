@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom';
-import ParallaxWallpaper from './assets/wallpapers/ParallaxWallpaper';
+import ParallaxWallpaper, { WallpaperClouds } from './assets/wallpapers/ParallaxWallpaper';
 import LoadingState from './components/common/LoadingState';
 import PageContainer from './components/layout/PageContainer';
 import Home from './pages/Home';
@@ -28,6 +28,7 @@ function App() {
       <div id="hero-backdrop" className="hero-backdrop" />
       <SiteWallpaper />
       <div className="parallax-content">
+        <WallpaperClouds />
         <Suspense
           fallback={
             <PageContainer>

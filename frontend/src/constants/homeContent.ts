@@ -5,8 +5,8 @@ export const SPHEREX_SECTION: HomeSectionCopy = {
   id: 'spherex',
   title: 'What is SPHEREx?',
   paragraphs: [
-    'SPHEREx is a NASA mission that observes the entire sky.',
-    'This section will present the mission’s history, its goals and the technology on board.',
+    'SPHEREx (Spectro-Photometer for the History of the Universe, Epoch of Reionization and Ices Explorer) is a NASA astrophysics mission that conducts the first-ever all-sky near-infrared spectral survey. By capturing data in over 100 different wavelength bands, the observatory maps hundreds of millions of galaxies and stars. This unprecedented wide-field approach helps scientists study the rapid expansion of the universe following the Big Bang and understand how cosmic structures first formed.',
+    'The mission centers around three primary scientific goals: exploring the origin of the universe, tracking the history of galaxy evolution, and measuring the distribution of water and other essential prebiotic molecules in interstellar ice. Over its planned operational lifetime, SPHEREx maps the entire sky multiple times to build detailed legacy catalogs. These findings provide valuable, broad-scale context that complements deeper, targeted observations made by instruments like the James Webb Space Telescope.',
   ],
 };
 
@@ -21,7 +21,7 @@ export const EXPLORER_SECTION: HomeSectionCopy = {
 export const EXPLORER_FEATURES: readonly ExplorerFeature[] = [
   {
     id: 'image',
-    title: 'Sky image',
+    title: 'SPHEREx image',
     description:
       'The image view centers the sky on your coordinates. Drag to move around and zoom in on the field.',
     example: 'image',
