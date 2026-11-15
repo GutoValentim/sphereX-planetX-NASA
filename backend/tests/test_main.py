@@ -62,13 +62,31 @@ class FakeService:
         return make_dataset(ra_deg, dec_deg)
 
 
+class StubSequenceJobs:
+    """Não dispara downloads: devolve um job fixo e registra a chamada."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def start(self, **kwargs) -> dict:
+        self.calls.append(kwargs)
+        return {"job_id": "aaaaaaaaaaaaaaaa", "status": "discovering"}
+
+    def snapshot(self, job_id: str) -> dict:
+        if job_id != "aaaaaaaaaaaaaaaa":
+            raise FileNotFoundError(job_id)
+        return {"job_id": job_id, "status": "completed", "frames": []}
+
+
 class PythonApiTests(unittest.TestCase):
     def client(self, service: FakeService) -> TestClient:
+        self.sequences = StubSequenceJobs()
         return TestClient(
             create_app(
                 service=service,
                 cache_dir=Path("/tmp/spherex-test-cache"),
                 retry_delay_seconds=0,
+                sequence_jobs=self.sequences,
             )
         )
 
@@ -188,7 +206,14 @@ class SpectrumApiTests(unittest.TestCase):
             self.cache,
             lambda path: "/espectros/arquivos/" + path.resolve().relative_to(self.cache.resolve()).as_posix(),
         )
-        self.client = TestClient(create_app(service=FakeService(), cache_dir=self.cache, spectrum_jobs=jobs))
+        self.client = TestClient(
+            create_app(
+                service=FakeService(),
+                cache_dir=self.cache,
+                spectrum_jobs=jobs,
+                sequence_jobs=StubSequenceJobs(),
+            )
+        )
 
     def wait(self, status_url: str) -> dict:
         import time
@@ -249,3 +274,50 @@ class SpectrumApiTests(unittest.TestCase):
                 response = self.client.get(path)
                 self.assertIn(response.status_code, (400, 404))  # nunca serve o arquivo
                 self.assertNotEqual(response.headers["content-type"], "image/svg+xml")
+
+
+class SequenceApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.cache = Path(self.tmp.name)
+        self.sequences = StubSequenceJobs()
+        self.client = TestClient(
+            create_app(service=FakeService(), cache_dir=self.cache, sequence_jobs=self.sequences)
+        )
+
+    def test_image_response_keeps_old_fields_and_adds_the_sequence(self) -> None:
+        body = self.client.post(
+            "/receber-dados",
+            json={"RA": 10, "DEC": -5, "bandas": ["D1", "D3"], "modo": "balanceada", "cor": "mono", "referencia": "D1"},
+        ).json()
+        self.assertEqual(body["frame_count"], 1)  # campos antigos intactos
+        self.assertEqual(body["sequencia"]["status_url"], "/sequencias/aaaaaaaaaaaaaaaa")
+        call = self.sequences.calls[0]
+        self.assertEqual(call["bandpasses"], ["SPHEREx-D1", "SPHEREx-D3"])
+        self.assertEqual(call["anchor_bandpass"], "SPHEREx-D1")
+        self.assertEqual((call["mode"], call["color_mode"], call["render_profile"]), ("balanced", "mono", "limpa"))
+
+    def test_defaults_and_invalid_profile(self) -> None:
+        self.client.post("/receber-dados", json={"RA": 10, "DEC": -5})
+        call = self.sequences.calls[0]
+        self.assertEqual(len(call["bandpasses"]), 6)
+        self.assertEqual((call["anchor_bandpass"], call["mode"], call["color_mode"]), ("SPHEREx-D3", "fast", "color"))
+        bad = self.client.post("/receber-dados", json={"RA": 10, "DEC": -5, "perfil": "hdr"})
+        self.assertEqual(bad.status_code, 400)
+
+    def test_status_and_frame_files(self) -> None:
+        self.assertEqual(self.client.get("/sequencias/aaaaaaaaaaaaaaaa").json()["status"], "completed")
+        self.assertEqual(self.client.get("/sequencias/bbbbbbbbbbbbbbbb").status_code, 404)
+        self.assertEqual(self.client.get("/sequencias/x").status_code, 400)
+        frame = self.cache / "0123456789abcdef" / "frames" / "limpa-color" / "001_obs.webp"
+        frame.parent.mkdir(parents=True)
+        frame.write_bytes(b"RIFF0000WEBP")
+        ok = self.client.get("/sequencias/arquivos/0123456789abcdef/frames/limpa-color/001_obs.webp?v=8")
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.headers["content-type"], "image/webp")
+        for path in (
+            "/sequencias/arquivos/0123456789abcdef/fits/x.fits",
+            "/sequencias/arquivos/0123456789abcdef/frames/limpa-color/../../dataset.json",
+        ):
+            self.assertIn(self.client.get(path).status_code, (400, 404))

@@ -137,6 +137,9 @@ def summarize(result: SpectrumResult, url_for: UrlBuilder) -> dict[str, Any]:
                 "outliers": list(band.outliers),
                 "error": band.error,
                 "points": [point.to_dict() for point in band.points],
+                "channels": [
+                    {"wavelength_um": wavelength, "flux_mjy": flux} for wavelength, flux in band.channels
+                ],
             }
             for band in result.bands
         ],

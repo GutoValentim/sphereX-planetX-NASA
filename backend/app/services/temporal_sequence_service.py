@@ -31,6 +31,7 @@ from app.services.image_aligner import (
     align_fits_image,
     build_common_sky_grid,
 )
+from app.services.cutout_cache import CalibrationStore, obtain_cutout
 from app.services.irsa_client import IrsaClient
 from app.services.spectral_color import get_spherex_band
 
@@ -187,6 +188,7 @@ class SpherexTemporalSequenceService:
         max_frames: int = DEFAULT_MAX_SEQUENCE_FRAMES,
         download_workers: int = DEFAULT_DOWNLOAD_WORKERS,
         pixel_scale_arcsec: float = FIXED_SEQUENCE_PIXEL_SCALE_ARCSEC,
+        lite_downloads: bool = False,
     ) -> None:
         if not 0 < fov_arcmin <= 60:
             raise ValueError("fov_arcmin deve estar no intervalo (0, 60].")
@@ -208,6 +210,8 @@ class SpherexTemporalSequenceService:
         self.max_frames = max_frames
         self.download_workers = download_workers
         self.pixel_scale_arcsec = float(pixel_scale_arcsec)
+        # Baixa só até a extensão IMAGE (+ WCS-WAVE em cache): ~0,8 MB em vez de ~9 MB.
+        self.lite_downloads = lite_downloads
         self._locks_guard = Lock()
         self._cache_locks: dict[str, Lock] = {}
         self._frame_locks: dict[tuple[str, int], Lock] = {}
@@ -328,14 +332,7 @@ class SpherexTemporalSequenceService:
                     if Path(result.fits_path).exists() and Path(result.frame.path).exists():
                         return result
 
-            fits_directory = dataset_directory / "fits"
-            fits_path = self.irsa_client.download(
-                observation,
-                fits_directory,
-                cutout_center=(dataset.ra_deg, dataset.dec_deg),
-                cutout_size_deg=dataset.cutout_fov_arcmin / 60,
-                overwrite=overwrite,
-            )
+            fits_path = self._download(dataset, observation, root, overwrite=overwrite)
             identifier = _SAFE_IDENTIFIER.sub("_", observation.observation_id)
             stem = f"{observation_index + 1:03d}_{identifier}"
             frame_path = dataset_directory / "frames" / variant / f"{stem}.webp"
@@ -410,6 +407,31 @@ class SpherexTemporalSequenceService:
                 )
                 _write_manifest(state_path, state)
             return result
+
+    def _download(
+        self,
+        dataset: TemporalDataset,
+        observation: ObservationRecord,
+        root: Path,
+        *,
+        overwrite: bool = False,
+    ) -> Path:
+        directory = self._cache_target(root, dataset.request_id) / "fits"
+        options = {
+            "cutout_center": (dataset.ra_deg, dataset.dec_deg),
+            "cutout_size_deg": dataset.cutout_fov_arcmin / 60,
+        }
+        if self.lite_downloads:
+            return obtain_cutout(
+                self.irsa_client,
+                observation,
+                directory,
+                stop_after="IMAGE",
+                store=CalibrationStore(root),
+                overwrite=overwrite,
+                **options,
+            )
+        return self.irsa_client.download(observation, directory, overwrite=overwrite, **options)
 
     def prefetch_frames(
         self,

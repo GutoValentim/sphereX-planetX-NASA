@@ -48,6 +48,49 @@
   visibility: hidden;
 }
 
+.view:not([hidden]):has(.sourceToggle) {
+  display: flex;
+  flex-direction: column;
+}
+
+.sourceToggle {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-1, 0.25rem);
+  padding: var(--space-2);
+  border-bottom: 1px solid rgb(255 255 255 / 0.12);
+}
+
+.sourceToggle button {
+  padding: 0.3rem 0.75rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid rgb(255 255 255 / 0.2);
+  border-radius: 999px;
+}
+
+.sourceToggle button[aria-pressed='true'] {
+  color: #000;
+  background: rgb(255 255 255 / 0.9);
+}
+
+.sourceView {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Hidden sources keep their size (Aladin needs a laid-out canvas) without taking space. */
+.sourceView[hidden] {
+  position: absolute;
+  inset: 0;
+  display: block;
+  visibility: hidden;
+}
+
 @media (max-width: 56rem) {
   .main {
     grid-template-columns: minmax(0, 1fr);
