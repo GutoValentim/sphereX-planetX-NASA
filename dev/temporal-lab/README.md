@@ -52,6 +52,21 @@ mostra o espaço livre em disco: cada alvo mapeado em um FOV ocupa da ordem de
 - As versões usam o venv da release atual: se uma versão nova exigir outra
   dependência, as antigas continuam com a mesma lista de pacotes.
 
+### V2 - Geração de Espectro Otimizada
+
+Esta versão mede λ somente nos quatro pixels necessários à interpolação
+bilinear e limita o processamento de IMAGE/VARIANCE à janela da abertura e do
+anel de fundo. Mantém todas as observações, a precisão float32 e os resultados
+da fotometria. Os benchmarks com FITS locais estão em
+[`dev/benchmarks/README.md`](../benchmarks/README.md).
+
+Após publicar o código, crie uma nova versão na aba **Versões do motor**, com o
+título **V2 - Geração de Espectro Otimizada**, e selecione-a no campo **Motor**.
+Em um acervo que contém apenas `v1`, ela será registrada como `v2`. A numeração
+é sequencial por acervo; esta atualização não renomeia versões nem modifica
+código, cache ou resultados de motores já congelados. A versão do formato de
+fotometria (`SPECTRUM_VERSION`) permanece igual, pois seu contrato não mudou.
+
 ## Registros e mapeamento
 
 - Cada busca salva um **registro** por coordenada (nome e descrição opcionais,

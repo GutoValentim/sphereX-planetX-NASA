@@ -13,6 +13,7 @@ from astropy.wcs import WCS
 from astropy.wcs.utils import proj_plane_pixel_area
 import numpy as np
 from reproject import reproject_interp
+from scipy.ndimage import map_coordinates
 
 
 ALIGNMENT_VERSION = 1
@@ -231,23 +232,52 @@ def _source_wavelength_map(
 
     if "WCS-WAVE" not in hdus or len(shape) != 2:
         return None
+    yy, xx = np.indices(shape, dtype=np.float64)
+    coordinates = np.column_stack((xx.ravel(), yy.ravel()))
+    values = _source_wavelength_values(hdus, image_hdu, coordinates)
+    return values.reshape(shape) if values is not None else None
+
+
+def _source_wavelength_values(
+    hdus: fits.HDUList, image_hdu: fits.ImageHDU, coordinates: np.ndarray
+) -> np.ndarray | None:
+    if "WCS-WAVE" not in hdus:
+        return None
     try:
-        spectral_header = image_hdu.header.copy()
-        sip_orders = {"A_ORDER", "B_ORDER", "AP_ORDER", "BP_ORDER"}
-        sip_prefixes = ("A_", "B_", "AP_", "BP_")
-        for keyword in tuple(spectral_header):
-            if keyword in sip_orders or keyword.startswith(sip_prefixes):
-                del spectral_header[keyword]
+        # A solução espectral é a WCS alternativa W. Metadados da exposição,
+        # WCS celeste e SIP não participam dela; serializá-los custa mais que
+        # avaliar a pequena tabela de calibração.
+        spectral_header = fits.Header(
+            card for card in image_hdu.header.cards
+            if card.keyword.endswith("W") or card.keyword in {"NAXIS", "NAXIS1", "NAXIS2"}
+        )
         spectral_wcs = WCS(spectral_header, hdus, key="W")
-        yy, xx = np.indices(shape, dtype=np.float64)
-        coordinates = np.column_stack((xx.ravel(), yy.ravel()))
         spectral_values = spectral_wcs.all_pix2world(coordinates, 0)
-        wavelength = np.asarray(spectral_values[:, 0], dtype=np.float32).reshape(shape)
+        wavelength = np.asarray(spectral_values[:, 0], dtype=np.float32)
     except (KeyError, TypeError, ValueError):
         return None
     if not np.isfinite(wavelength).any():
         return None
     return wavelength
+
+
+def source_wavelength_at(
+    hdus: fits.HDUList, image_hdu: fits.ImageHDU, shape: tuple[int, int], x: float, y: float
+) -> float | None:
+    """Mesmo λ bilinear do mapa completo, avaliando só os quatro pixels vizinhos."""
+
+    x = float(np.clip(x, 0, shape[1] - 1))
+    y = float(np.clip(y, 0, shape[0] - 1))
+    x0, y0 = int(np.floor(x)), int(np.floor(y))
+    x1, y1 = min(x0 + 1, shape[1] - 1), min(y0 + 1, shape[0] - 1)
+    values = _source_wavelength_values(
+        hdus, image_hdu, np.array([[x0, y0], [x1, y0], [x0, y1], [x1, y1]], dtype=float)
+    )
+    if values is None:
+        return None
+    # Mantém o arredondamento float32 e a interpolação usados pelos mapas.
+    value = map_coordinates(values.reshape(2, 2), [[y - y0], [x - x0]], order=1, mode="nearest")[0]
+    return float(value) if np.isfinite(value) else None
 
 
 def source_wavelength_map(

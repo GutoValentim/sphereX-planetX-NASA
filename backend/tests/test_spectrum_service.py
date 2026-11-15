@@ -106,6 +106,39 @@ class PhotometryTests(unittest.TestCase):
         with self.assertRaises(PhotometryRejected):
             measure_spectral_point(self.path, observation("a"), ra_deg=RA, dec_deg=DEC + 0.03)
 
+    def test_large_image_section_preserves_flux_background_and_uncertainty(self) -> None:
+        write_star(self.path, total_mjy=1.5, background=0.3)
+        # Posição fracionária evita ambiguidade em pixels exatamente no raio.
+        ra = RA + 0.0004
+        for with_variance in (True, False):
+            with self.subTest(with_variance=with_variance):
+                with fits.open(self.path) as hdus:
+                    small = fits.HDUList([h.copy() for h in hdus])
+                if not with_variance:
+                    del small["VARIANCE"]
+                small.writeto(self.path, overwrite=True)
+                expected = measure_spectral_point(self.path, observation("a"), ra_deg=ra, dec_deg=DEC)
+                for hdu in small[1:]:
+                    hdu.data = np.pad(hdu.data, 100, constant_values=0.3)
+                small["IMAGE"].header["CRPIX1"] += 100
+                small["IMAGE"].header["CRPIX2"] += 100
+                large_path = self.path.with_name("large.fits")
+                small.writeto(large_path, overwrite=True)
+                actual = measure_spectral_point(large_path, observation("a"), ra_deg=ra, dec_deg=DEC)
+                for key in ("flux_mjy", "flux_error_mjy", "background_mjy_sr", "aperture_pixels"):
+                    self.assertAlmostEqual(getattr(actual, key), getattr(expected, key), places=12)
+
+    def test_custom_aperture_larger_than_annulus_keeps_all_available_pixels(self) -> None:
+        write_star(self.path, total_mjy=1.5)
+        yy, xx = np.indices((41, 41))
+        for radius in (12.0, 24.0):
+            with self.subTest(radius=radius):
+                point = measure_spectral_point(
+                    self.path, observation("a"), ra_deg=RA, dec_deg=DEC, aperture_radius_px=radius,
+                )
+                expected = np.count_nonzero(np.hypot(xx - point.pixel_x, yy - point.pixel_y) <= radius)
+                self.assertEqual(point.aperture_pixels, expected)
+
     def test_channel_medians_follow_wavelength_order(self) -> None:
         write_star(self.path, total_mjy=1.0)
         base = measure_spectral_point(self.path, observation("a"), ra_deg=RA, dec_deg=DEC)

@@ -8,8 +8,11 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.wcs import WCS
 import numpy as np
+from scipy.ndimage import map_coordinates
 
-from app.services.image_aligner import align_fits_image, build_common_sky_grid
+from app.services.image_aligner import (
+    align_fits_image, build_common_sky_grid, source_wavelength_at, source_wavelength_map,
+)
 
 
 TARGET_RA = 133.795129167
@@ -159,3 +162,52 @@ class ImageAlignerTests(unittest.TestCase):
 
             self.assertAlmostEqual(x_pixel, expected, places=7)
             self.assertAlmostEqual(y_pixel, expected, places=7)
+
+
+class WavelengthSamplingTests(unittest.TestCase):
+    def test_tabular_sampling_matches_full_wcs_map_with_sip_and_subpixel_positions(self) -> None:
+        # Tabela não linear e não simétrica para detectar troca x/y, origem e
+        # arredondamento; a WCS celeste SIP não pertence à solução espectral W.
+        x, y = np.meshgrid([1, 21, 41], [1, 21, 41])
+        values = np.stack((1 + x * 0.01 + y * 0.002 + x * y * 0.0001, np.full(x.shape, 0.04)), axis=-1)
+        table = fits.BinTableHDU.from_columns([
+            fits.Column(name="X", format="3J", array=[[1, 21, 41]]),
+            fits.Column(name="Y", format="3J", array=[[1, 21, 41]]),
+            fits.Column(name="VALUES", format="18E", dim="(2,3,3)", array=[values]),
+        ], name="WCS-WAVE")
+        image = fits.ImageHDU(np.ones((41, 41)), name="IMAGE")
+        header = image.header
+        header["WCSAXESW"] = 2
+        for axis in (1, 2):
+            for key, value in (("CTYPE", "WAVE-TAB"), ("CUNIT", "um"), ("CRPIX", 1),
+                               ("CRVAL", 1), ("CDELT", 1)):
+                header[f"{key}{axis}W"] = value
+            header[f"PS{axis}_0W"] = "WCS-WAVE"
+            header[f"PS{axis}_1W"] = "VALUES"
+            header[f"PS{axis}_2W"] = "X" if axis == 1 else "Y"
+            header[f"PV{axis}_3W"] = axis
+        header["A_ORDER"] = 2
+        header["B_ORDER"] = 2
+        header["A_2_0"] = 1e-5
+        header["B_0_2"] = -2e-5
+        hdus = fits.HDUList([fits.PrimaryHDU(), image, table])
+        # Referência independente: caminho anterior, com o cabeçalho completo
+        # e remoção de SIP antes da avaliação de todos os pixels.
+        reference_header = header.copy()
+        for key in tuple(reference_header):
+            if key.startswith(("A_", "B_", "AP_", "BP_")):
+                del reference_header[key]
+        yy, xx = np.indices(image.shape)
+        reference = WCS(reference_header, hdus, key="W").all_pix2world(
+            np.column_stack((xx.ravel(), yy.ravel())), 0
+        )[:, 0].astype(np.float32).reshape(image.shape)
+        np.testing.assert_array_equal(source_wavelength_map(hdus, image, image.shape), reference)
+        for x, y in ((0, 0), (40, 40), (12.345, 23.456), (20, 20), (-0.2, 41.2)):
+            with self.subTest(x=x, y=y):
+                expected = float(map_coordinates(reference, [[y], [x]], order=1, mode="nearest")[0])
+                self.assertEqual(source_wavelength_at(hdus, image, image.shape, x, y), expected)
+
+    def test_missing_calibration_returns_no_wavelength(self) -> None:
+        image = fits.ImageHDU(np.ones((41, 41)), name="IMAGE")
+        hdus = fits.HDUList([fits.PrimaryHDU(), image])
+        self.assertIsNone(source_wavelength_at(hdus, image, image.shape, 20.5, 20.5))
