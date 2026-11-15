@@ -219,3 +219,8 @@
   place-items: center;
   background-color: var(--color-page);
 }
+
+/* Slight blur hides the low resolution of the all-sky image (UI_FEATURES.skyBackgroundBlur). */
+.canvasSoft {
+  filter: blur(0.6px);
+}

@@ -90,6 +90,15 @@ Each state also has a `*-subtle` background (e.g. `--color-error-subtle`), deriv
   `PlotlyChart` resolves these tokens at render time.
 - **Sky viewer:** `--color-viewer-background` / `--color-on-viewer` stay dark in both
   themes. Scientific image colormaps are defined by the data, never by the UI theme.
+- **Sky targets:** `--sky-target-1…5` is the fixed starlight palette of the mapped-target
+  markers on the sky sphere (same in both themes). Each target picks one tone and a size
+  deterministically from its id.
+
+### Feature flags
+
+`frontend/src/constants/uiFeatures.ts` switches each visual feature independently (sky blur,
+dust, dust inertia, target markers, target list, viewer targets tab, search-page targets list,
+spectrum gallery).
 
 ## 3. Themes
 

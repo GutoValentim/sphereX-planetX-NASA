@@ -142,6 +142,8 @@ export interface SpectrumBand {
   error: string | null;
   points: SpectrumPoint[];
   channels: { wavelength_um: number; flux_mjy: number }[];
+  /** Rendered SVG chart of this band (relative API path). */
+  chart_url?: string | null;
 }
 
 export interface SpectrumSnapshot {
@@ -152,9 +154,10 @@ export interface SpectrumSnapshot {
   error: string | null;
 }
 
-export async function startSpectrum(query: ObservationQuery, signal?: AbortSignal) {
+/** Charts are rendered by the backend for one theme; `theme` picks the matching colors. */
+export async function startSpectrum(query: ObservationQuery, signal?: AbortSignal, theme: 'dark' | 'light' = 'dark') {
   return requestJson<{ status_url: string; job: SpectrumSnapshot }>(
-    consultationPath(query, { elemento: 'espectro' }),
+    consultationPath(query, { elemento: 'espectro', tema: theme === 'light' ? 'claro' : 'escuro' }),
     signal,
   );
 }

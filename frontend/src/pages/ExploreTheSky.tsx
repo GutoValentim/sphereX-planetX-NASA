@@ -2,7 +2,9 @@ import { useCallback, useMemo, useTransition } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import ButtonLink from '../components/common/ButtonLink';
 import CoordinateForm from '../components/explore/CoordinateForm';
+import KnownTargets from '../components/explore/KnownTargets';
 import PageContainer from '../components/layout/PageContainer';
+import { UI_FEATURES } from '../constants/uiFeatures';
 import { ROUTES } from '../routes/paths';
 import type { ObservationQuery } from '../types/observation';
 import { formValuesFromQuery } from '../utils/exploreFormMapping';
@@ -39,6 +41,7 @@ function ExploreTheSky() {
             Or select a point on the sky sphere
           </ButtonLink>
         </header>
+        {UI_FEATURES.exploreTargetsList && <KnownTargets />}
         <CoordinateForm onSubmit={handleSubmit} initialValues={initialValues} isSubmitting={isNavigating} />
       </div>
     </PageContainer>

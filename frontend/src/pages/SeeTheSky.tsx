@@ -4,13 +4,19 @@ import ButtonLink from '../components/common/ButtonLink';
 import EmptyState from '../components/common/EmptyState';
 import PageContainer from '../components/layout/PageContainer';
 import ObservationWorkspace from '../components/viewer/ObservationWorkspace';
-import { ROUTES, VIEWER_ENTRY_MAP, type RouteTarget } from '../routes/paths';
+import { useCatalog } from '../hooks/useCatalog';
+import { ROUTES, VIEWER_ENTRY_MAP, VIEWER_TARGET_PARAM, type RouteTarget } from '../routes/paths';
+import { CATALOG_ENABLED } from '../services/catalog';
 import { fromQueryParams, toQueryParams } from '../utils/observationQueryParams';
 import styles from './SeeTheSky.module.css';
 
 function SeeTheSky() {
   const [searchParams] = useSearchParams();
   const query = useMemo(() => fromQueryParams(searchParams), [searchParams]);
+  const targetSlug = CATALOG_ENABLED ? searchParams.get(VIEWER_TARGET_PARAM) : null;
+  const catalog = useCatalog();
+  const targetName = catalog.targets.find((entry) => entry.slug === targetSlug)?.name;
+  const title = targetName ?? 'SPHEREx Image';
 
   const fromSkyMap = searchParams.get('entry') === VIEWER_ENTRY_MAP;
   const exploreTarget: RouteTarget = fromSkyMap
@@ -37,8 +43,8 @@ function SeeTheSky() {
   }
 
   return (
-    <PageContainer title="SPHEREx Image" backTo={exploreTarget}>
-      <ObservationWorkspace key={searchParams.toString()} query={query} />
+    <PageContainer title={title} backTo={exploreTarget}>
+      <ObservationWorkspace key={searchParams.toString()} query={query} targetSlug={targetSlug} />
       <div className={styles.actions}>
         <ButtonLink to={exploreTarget} size="lg">
           Explore Again <span aria-hidden="true">→</span>

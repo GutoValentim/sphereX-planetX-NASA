@@ -131,6 +131,13 @@
   --color-viewer-background: #0b1020;
   --color-on-viewer: #f3f6fb;
 
+  /* Mapped targets on the sky sphere: a fixed, soft starlight palette (same in both themes). */
+  --sky-target-1: #9fd0ff;
+  --sky-target-2: #b8a8ff;
+  --sky-target-3: #ffd89e;
+  --sky-target-4: #8ff0d8;
+  --sky-target-5: #ffb8cf;
+
   /*
    * Legacy aliases used by pages not yet migrated (Phase 2 removes them).
    * New code must use the role tokens above.

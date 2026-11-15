@@ -28,9 +28,12 @@ services:
     volumes:
       - ${SPHEREX_API_RELEASE_DIR:-/opt/docker/spherex/current-api}:/app:ro
       - /opt/docker/spherex/api.env:/run/spherex-api.env:ro
+      # Exportações do laboratório (alvos pré-mapeados), só leitura: /api/catalogo.
+      - /opt/docker/spherex/lab/exports:/catalog:ro
     environment:
       NODE_ENV: production
       PORT: "3000"
+      SPHEREX_CATALOG_DIR: /catalog
       FRONTEND_ORIGIN: https://${FRONTEND_DOMAIN:-spherex.prospectordigital.com.br}
       # Tem precedência sobre api.env: o serviço Python só é alcançável pela rede interna.
       PYTHON_API_URL: http://spherex-python:8000

@@ -1,0 +1,80 @@
+/* Mapped targets on the Search coordinates page (UI_FEATURES.exploreTargetsList). */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background-color: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-card);
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-h3);
+}
+
+.note {
+  margin: 0;
+  font-size: var(--font-size-small);
+  color: var(--color-text-secondary);
+}
+
+.list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(15rem, 100%), 1fr));
+  gap: var(--space-2);
+  max-height: 18rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'name arrow'
+    'coords arrow';
+  align-items: center;
+  gap: 2px var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-primary);
+  text-decoration: none;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition:
+    border-color var(--duration-fast) var(--easing-standard),
+    background-color var(--duration-fast) var(--easing-standard);
+}
+
+.item:hover {
+  background-color: var(--color-interactive-subtle);
+  border-color: var(--color-interactive);
+}
+
+.name {
+  grid-area: name;
+  font-family: var(--font-ui);
+  font-weight: var(--font-weight-semibold);
+}
+
+.coords {
+  grid-area: coords;
+  font-size: var(--font-size-label);
+  color: var(--color-text-secondary);
+}
+
+.arrow {
+  grid-area: arrow;
+  color: var(--color-interactive);
+}

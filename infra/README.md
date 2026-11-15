@@ -33,6 +33,7 @@ O SHA vem do arquivo gerado `.release.env`, incluído em cada release. Se a subi
 - `/opt/docker/spherex/api-current-sha`, `frontend-current-sha` e `python-current-sha`: últimas releases publicadas de cada serviço.
 - `/opt/docker/spherex/cache`: cache gravável do Python (UID 1000); pode ser apagado, tudo é regenerável.
 - `/opt/docker/spherex/lab`: acervo do laboratório (UID 1000): motores congelados, registros, caches por versão e `exports/` para o produto. **Não é regenerável sem horas de download do IRSA; não apague.** `CREDENTIALS.txt` tem o usuário e a senha do lab (gerados no primeiro start; para trocar, apague `auth.json` e `CREDENTIALS.txt` e reinicie o container).
+- `/opt/docker/spherex/lab/exports`: montado na API como `/catalog:ro` (`SPHEREX_CATALOG_DIR`) para `/api/catalogo`. Precisa existir (UID 1000) antes do deploy da stack; se o Docker criar a pasta, ela fica com dono root e o lab não consegue exportar.
 - `/opt/docker/spherex/current-sha`: SHA do último deploy concluído.
 - `/usr/local/sbin/spherex-deploy`: cópia root-owned de `deploy.sh`.
 - `/usr/local/bin/spherex-ssh-deploy`: cópia root-owned do comando SSH restrito.

@@ -1,23 +1,30 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AladinViewer from './AladinViewer';
+import MappedTargetsPanel from './MappedTargetsPanel';
 import MonochromePanel from './MonochromePanel';
 import ObservationMetadata from './ObservationMetadata';
 import SavedImages from './SavedImages';
 import SpectralBandPanel from './SpectralBandPanel';
 import SpectralChart from './SpectralChart';
+import SpectrumGallery from './SpectrumGallery';
 import SpherexFrameView from './SpherexFrameView';
 import TimelinePlayer from './TimelinePlayer';
 import ViewModeToggle from './ViewModeToggle';
 import { DEFAULT_SPECTRAL_BAND, SPECTRAL_BANDS } from '../../constants/spectralBands';
+import { UI_FEATURES } from '../../constants/uiFeatures';
 import { useBandSelection } from '../../hooks/useBandSelection';
+import { useCatalogManifest } from '../../hooks/useCatalog';
 import { useObservationFrames } from '../../hooks/useObservationFrames';
 import { useSpectrum } from '../../hooks/useSpectrum';
+import { useTheme } from '../../hooks/useTheme';
 import { useTimeline } from '../../hooks/useTimeline';
 import { ROUTES } from '../../routes/paths';
-import type { ObservationQuery } from '../../types/observation';
+import { CATALOG_ENABLED } from '../../services/catalog';
+import type { ObservationFrameSource, ObservationQuery } from '../../types/observation';
 import type { ViewMode } from '../../types/viewer';
 import { toSpectrumDatasets } from '../../utils/apiMapping';
+import { galleryFromLiveSpectrum, galleryFromManifest, manifestFrames } from '../../utils/catalogMapping';
 import { rememberImage, type SavedImage } from '../../utils/imageHistory';
 import { toQueryParams } from '../../utils/observationQueryParams';
 import styles from './ObservationWorkspace.module.css';
@@ -27,13 +34,21 @@ const DISPLAY_BANDS = SPECTRAL_BANDS.filter((band) => band.id !== DEFAULT_SPECTR
 const DISPLAY_BAND_IDS = DISPLAY_BANDS.map((band) => band.id);
 
 type ImageSource = 'spherex' | 'reference';
+type SideTab = 'bands' | 'targets';
+
+const SHOW_TARGETS_TAB = UI_FEATURES.viewerTargetsTab && CATALOG_ENABLED;
 
 interface ObservationWorkspaceProps {
   query: ObservationQuery;
+  /** Slug of a target mapped by the lab: images and spectrum come from its export, not a live job. */
+  targetSlug?: string | null;
 }
 
-function ObservationWorkspace({ query }: ObservationWorkspaceProps) {
+function ObservationWorkspace({ query, targetSlug = null }: ObservationWorkspaceProps) {
   const navigate = useNavigate();
+  const { theme } = useTheme();
+  const isTarget = Boolean(targetSlug);
+  const [sideTab, setSideTab] = useState<SideTab>('bands');
   const [viewMode, setViewMode] = useState<ViewMode>('image');
   const [imageSource, setImageSource] = useState<ImageSource>('spherex');
   const [monochrome, setMonochrome] = useState(false);
@@ -43,17 +58,33 @@ function ObservationWorkspace({ query }: ObservationWorkspaceProps) {
   const [chartRequested, setChartRequested] = useState(false);
 
   const { selectedBandIds, toggleBand, selectAll, clearAll } = useBandSelection(DISPLAY_BAND_IDS);
-  const colorSource = useObservationFrames(query, 'falsa');
-  const monoSource = useObservationFrames(query, 'mono', monoRequested);
-  const source = monochrome ? monoSource : colorSource;
+  const target = useCatalogManifest(targetSlug);
+  // A partially mapped target may lack images or spectrum: those parts fall back to a live query.
+  const targetLoading = isTarget && target.status === 'loading';
+  const imagesFromTarget = targetLoading || (target.manifest?.sequences.length ?? 0) > 0;
+  const spectrumFromTarget =
+    targetLoading || Boolean(target.manifest && galleryFromManifest(target.manifest, theme));
+  const colorSource = useObservationFrames(query, 'falsa', !imagesFromTarget);
+  const monoSource = useObservationFrames(query, 'mono', monoRequested && !imagesFromTarget);
+  const targetSource = useMemo<ObservationFrameSource>(() => {
+    if (!target.manifest) return { frames: [], isDemo: false, status: 'loading' };
+    return { frames: manifestFrames(target.manifest, monochrome ? 'mono' : 'color'), isDemo: false, status: 'ready' };
+  }, [target, monochrome]);
+  const source = imagesFromTarget ? targetSource : monochrome ? monoSource : colorSource;
 
   useEffect(() => {
+    if (imagesFromTarget) return;
     if (colorSource.status === 'ready' && colorSource.frames.some((frame) => frame.layers?.some((layer) => layer.imageUrl))) {
       rememberImage(query);
     }
-  }, [colorSource.status, colorSource.frames, query]);
+  }, [imagesFromTarget, colorSource.status, colorSource.frames, query]);
   const timeline = useTimeline(source.frames, { preferredDate: query.observationDate });
-  const spectrum = useSpectrum(query, chartRequested);
+  const spectrum = useSpectrum(query, chartRequested && !spectrumFromTarget, theme);
+  const spectrumGallery = useMemo(() => {
+    if (spectrumFromTarget) return target.manifest ? galleryFromManifest(target.manifest, theme) : null;
+    return spectrum.snapshot?.result ? galleryFromLiveSpectrum(spectrum.snapshot.result) : null;
+  }, [spectrumFromTarget, target.manifest, theme, spectrum.snapshot]);
+  const spectrumError = !spectrumFromTarget && spectrum.status === 'error' ? spectrum.error : null;
 
   const selectedBands = useMemo(
     () => DISPLAY_BANDS.filter((band) => selectedBandIds.includes(band.id)),
@@ -81,29 +112,81 @@ function ObservationWorkspace({ query }: ObservationWorkspaceProps) {
   const spectrumProgress = spectrum.progress.total
     ? ` (${spectrum.progress.done}/${spectrum.progress.total} observations)`
     : '';
-  const spectrumLoading =
-    spectrum.status === 'loading'
+  const spectrumLoading = spectrumFromTarget
+    ? 'Loading the mapped spectrum…'
+    : spectrum.status === 'loading'
       ? `Measuring the target in every SPHEREx observation${spectrumProgress}… a new coordinate takes 1–2 minutes.`
       : null;
+
+  const bandControls = (
+    <>
+      <SpectralBandPanel
+        bands={DISPLAY_BANDS}
+        selectedBandIds={selectedBandIds}
+        onToggle={toggleBand}
+        onSelectAll={selectAll}
+        onClearAll={clearAll}
+      />
+      <MonochromePanel
+        enabled={monochrome}
+        onChange={(enabled) => {
+          setMonochrome(enabled);
+          if (enabled) setMonoRequested(true);
+        }}
+      />
+    </>
+  );
 
   return (
     <div className={styles.workspace}>
       <div className={styles.main}>
         <div className={styles.bands}>
-          <SpectralBandPanel
-            bands={DISPLAY_BANDS}
-            selectedBandIds={selectedBandIds}
-            onToggle={toggleBand}
-            onSelectAll={selectAll}
-            onClearAll={clearAll}
-          />
-          <MonochromePanel
-            enabled={monochrome}
-            onChange={(enabled) => {
-              setMonochrome(enabled);
-              if (enabled) setMonoRequested(true);
-            }}
-          />
+          {SHOW_TARGETS_TAB ? (
+            <>
+              <div className={styles.sideTabs} role="tablist" aria-label="Side panel">
+                <button
+                  type="button"
+                  role="tab"
+                  id="side-tab-bands"
+                  aria-selected={sideTab === 'bands'}
+                  aria-controls="side-panel-bands"
+                  onClick={() => setSideTab('bands')}
+                >
+                  Bands
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  id="side-tab-targets"
+                  aria-selected={sideTab === 'targets'}
+                  aria-controls="side-panel-targets"
+                  onClick={() => setSideTab('targets')}
+                >
+                  Mapped targets
+                </button>
+              </div>
+              <div
+                className={styles.sidePanel}
+                role="tabpanel"
+                id="side-panel-bands"
+                aria-labelledby="side-tab-bands"
+                hidden={sideTab !== 'bands'}
+              >
+                {bandControls}
+              </div>
+              <div
+                className={styles.sidePanel}
+                role="tabpanel"
+                id="side-panel-targets"
+                aria-labelledby="side-tab-targets"
+                hidden={sideTab !== 'targets'}
+              >
+                <MappedTargetsPanel activeSlug={targetSlug} />
+              </div>
+            </>
+          ) : (
+            bandControls
+          )}
         </div>
 
         {/* Both views stay mounted so switching modes does not recreate the viewer or chart instances. */}
@@ -142,11 +225,11 @@ function ObservationWorkspace({ query }: ObservationWorkspaceProps) {
             )}
           </section>
           <section className={styles.view} hidden={viewMode !== 'chart'} aria-label="Chart">
-            <SpectralChart
-              datasets={chartDatasets}
-              loadingMessage={spectrumLoading}
-              errorMessage={spectrum.status === 'error' ? spectrum.error : null}
-            />
+            {UI_FEATURES.spectrumGallery ? (
+              <SpectrumGallery data={spectrumGallery} loadingMessage={spectrumLoading} errorMessage={spectrumError} />
+            ) : (
+              <SpectralChart datasets={chartDatasets} loadingMessage={spectrumLoading} errorMessage={spectrumError} />
+            )}
           </section>
         </div>
 

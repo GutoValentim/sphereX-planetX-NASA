@@ -4,9 +4,19 @@ import { buttonClassName } from '../common/buttonClassName';
 import ErrorState from '../common/ErrorState';
 import LoadingState from '../common/LoadingState';
 import { DEFAULT_SPECTRAL_BAND, SPECTRAL_BANDS } from '../../constants/spectralBands';
+import { UI_FEATURES } from '../../constants/uiFeatures';
+import type { CatalogEntry } from '../../services/catalog';
 import { formatDegrees, formatRaHms, raDegreesToHms } from '../../utils/coordinateConversion';
+import { equatorialToWorldDirection } from '../../utils/galacticCoordinates';
+import SkyDust from './SkyDust';
+import SkyTargetList from './SkyTargetList';
+import SkyTargetMarkers, { type TargetOpenRequest } from './SkyTargetMarkers';
 import { SkySphereRenderer, type SkyFrame, type SkySelection } from './skySphereRenderer';
 import styles from './SkySphere.module.css';
+
+/** Where a target lands after "fly to": a little above and left of the center. */
+const FLY_TO_OFFSET = { x: -0.12, y: -0.1 };
+const FLY_TO_FOV_DEG = 30;
 
 const SKY_MAPS = {
   gas: { url: '/sky/spherex-allsky.jpg', label: 'Gas and dust' },
@@ -18,6 +28,9 @@ type SkyMapId = keyof typeof SKY_MAPS;
 interface SkySphereProps {
   onOpenViewer: (selection: SkySelection) => void;
   isOpeningViewer?: boolean;
+  /** Targets already mapped by the lab, drawn on the sphere. */
+  targets?: readonly CatalogEntry[];
+  onOpenTarget?: (entry: CatalogEntry) => void;
 }
 
 function formatSigned(value: number, digits: number): string {
@@ -65,7 +78,7 @@ function paintFrame(
 }
 
 /** All-sky map viewed from the center of a sphere. A click selects ICRS coordinates. */
-function SkySphere({ onOpenViewer, isOpeningViewer = false }: SkySphereProps) {
+function SkySphere({ onOpenViewer, isOpeningViewer = false, targets = [], onOpenTarget }: SkySphereProps) {
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const markerRef = useRef<HTMLDivElement>(null);
@@ -84,6 +97,26 @@ function SkySphere({ onOpenViewer, isOpeningViewer = false }: SkySphereProps) {
   gridRef.current = gridOn;
   const [selection, setSelection] = useState<SkySelection | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [openRequest, setOpenRequest] = useState<TargetOpenRequest | null>(null);
+
+  // Overlays (dust, target markers) follow the camera through this listener set.
+  const frameListeners = useRef(new Set<(frame: SkyFrame) => void>());
+  const subscribeFrame = useCallback((listener: (frame: SkyFrame) => void) => {
+    frameListeners.current.add(listener);
+    return () => {
+      frameListeners.current.delete(listener);
+    };
+  }, []);
+
+  const flyToTarget = useCallback((entry: CatalogEntry) => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.flyTo(equatorialToWorldDirection(entry.ra_deg, entry.dec_deg), {
+      offset: FLY_TO_OFFSET,
+      fovDeg: FLY_TO_FOV_DEG,
+      onDone: () => setOpenRequest((previous) => ({ id: entry.id, nonce: (previous?.nonce ?? 0) + 1 })),
+    });
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -100,6 +133,7 @@ function SkySphere({ onOpenViewer, isOpeningViewer = false }: SkySphereProps) {
           const mark = markerRef.current;
           if (!mark) return;
           paintFrame(frame, mark, boxRef.current, centerRef.current, fovRef.current, controlsRef.current);
+          frameListeners.current.forEach((listener) => listener(frame));
         },
       });
     } catch (error) {
@@ -135,11 +169,23 @@ function SkySphere({ onOpenViewer, isOpeningViewer = false }: SkySphereProps) {
     <div ref={stageRef} className={styles.stage}>
       <canvas
         ref={canvasRef}
-        className={styles.canvas}
+        className={UI_FEATURES.skyBackgroundBlur ? `${styles.canvas} ${styles.canvasSoft}` : styles.canvas}
         tabIndex={0}
         aria-label="All-sky sphere. Drag to look around, click to select a point. Arrow keys pan, plus and minus zoom."
       />
+      {UI_FEATURES.skyDust && status === 'ready' && (
+        <SkyDust subscribeFrame={subscribeFrame} inertia={UI_FEATURES.skyDustInertia} />
+      )}
       <div className={styles.crosshair} aria-hidden="true" />
+      {UI_FEATURES.skyTargetMarkers && status === 'ready' && onOpenTarget && targets.length > 0 && (
+        <SkyTargetMarkers
+          targets={targets}
+          rendererRef={rendererRef}
+          subscribeFrame={subscribeFrame}
+          openRequest={openRequest}
+          onOpenTarget={onOpenTarget}
+        />
+      )}
       <div ref={setMarker} className={styles.marker}>
         <svg viewBox="-22 -22 44 44" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
           <circle r="12" />
@@ -184,6 +230,9 @@ function SkySphere({ onOpenViewer, isOpeningViewer = false }: SkySphereProps) {
       <div className={styles.hint}>
         <p className={styles.hintTitle}>Sky sphere</p>
         <p>Drag to look around. Click a point to read its coordinates, then open the image viewer.</p>
+        {UI_FEATURES.skyTargetMarkers && targets.length > 0 && (
+          <p>Glowing dots are targets already mapped: hover one to open its images and spectrum.</p>
+        )}
         <p className={styles.credit}>
           SPHEREx all-sky maps, NASA/JPL-Caltech. Galactic Mollweide projection, viewed from the center of the
           sphere.
@@ -227,6 +276,9 @@ function SkySphere({ onOpenViewer, isOpeningViewer = false }: SkySphereProps) {
           >
             Recenter
           </button>
+          {UI_FEATURES.skyTargetList && targets.length > 0 && (
+            <SkyTargetList targets={targets} onSelect={flyToTarget} />
+          )}
           <span ref={centerRef} className={`text-data ${styles.readout}`} />
         </div>
       )}
