@@ -40,6 +40,11 @@
 }
 
 .item {
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
@@ -57,7 +62,8 @@
     background-color var(--duration-fast) var(--easing-standard);
 }
 
-.item:hover {
+.item:hover,
+.item[aria-pressed='true'] {
   background-color: var(--color-interactive-subtle);
   border-color: var(--color-interactive);
 }
@@ -77,4 +83,9 @@
 .arrow {
   grid-area: arrow;
   color: var(--color-interactive);
+}
+
+.item:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus);
+  outline-offset: 2px;
 }

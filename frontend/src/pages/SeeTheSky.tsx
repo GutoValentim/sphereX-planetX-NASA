@@ -4,6 +4,8 @@ import ButtonLink from '../components/common/ButtonLink';
 import EmptyState from '../components/common/EmptyState';
 import PageContainer from '../components/layout/PageContainer';
 import ObservationWorkspace from '../components/viewer/ObservationWorkspace';
+import ExploreModeSwitch from '../components/layout/ExploreModeSwitch';
+import { UI_FEATURES } from '../constants/uiFeatures';
 import { useCatalog } from '../hooks/useCatalog';
 import { ROUTES, VIEWER_ENTRY_MAP, VIEWER_TARGET_PARAM, type RouteTarget } from '../routes/paths';
 import { CATALOG_ENABLED } from '../services/catalog';
@@ -44,6 +46,11 @@ function SeeTheSky() {
 
   return (
     <PageContainer title={title} backTo={exploreTarget}>
+      {UI_FEATURES.exploreModeSwitch && (
+        <div className={styles.modeRow}>
+          <ExploreModeSwitch coordinatesSearch={`?${toQueryParams(query)}`} />
+        </div>
+      )}
       <ObservationWorkspace key={searchParams.toString()} query={query} targetSlug={targetSlug} />
       <div className={styles.actions}>
         <ButtonLink to={exploreTarget} size="lg">

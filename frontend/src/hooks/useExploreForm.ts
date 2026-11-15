@@ -37,6 +37,13 @@ export function useExploreForm(
     setValues((current) => ({ ...current, [field]: value }));
   }, []);
 
+  /** Replaces some values (e.g. a mapped target's coordinates) and starts validation afresh. */
+  const fillValues = useCallback((partial: Partial<ExploreFormValues>) => {
+    setValues((current) => ({ ...current, ...partial }));
+    setTouched({});
+    setSubmitAttempted(false);
+  }, []);
+
   const markTouched = useCallback((field: ExploreFormField) => {
     setTouched((current) => (current[field] ? current : { ...current, [field]: true }));
   }, []);
@@ -65,6 +72,7 @@ export function useExploreForm(
     hasErrors: submitAttempted && validation.query === null,
     raDegrees: validation.raDeg,
     setField,
+    fillValues,
     markTouched,
     handleSubmit,
   };

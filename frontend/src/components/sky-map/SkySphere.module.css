@@ -237,3 +237,11 @@
 .canvasDim {
   filter: var(--sky-filter-blur, ) var(--sky-filter-dim, );
 }
+
+/* Search coordinates / Sky map switch (UI_FEATURES.exploreModeSwitch). */
+.modeSwitch {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  z-index: 4;
+}

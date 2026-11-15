@@ -10,6 +10,7 @@ import { UI_FEATURES } from '../../constants/uiFeatures';
 import type { CatalogEntry } from '../../services/catalog';
 import { formatDegrees, formatRaHms, raDegreesToHms } from '../../utils/coordinateConversion';
 import { equatorialToWorldDirection } from '../../utils/galacticCoordinates';
+import ExploreModeSwitch from '../layout/ExploreModeSwitch';
 import SkyDust from './SkyDust';
 import SkyTargetList from './SkyTargetList';
 import SkyTargetMarkers, { type TargetOpenRequest } from './SkyTargetMarkers';
@@ -244,6 +245,10 @@ function SkySphere({ onOpenViewer, isOpeningViewer = false, targets = [], onOpen
           </Button>
           <p className={styles.viewerHint}>Latest available observation, band {bandLabel}.</p>
         </section>
+      )}
+
+      {UI_FEATURES.exploreModeSwitch && (
+        <ExploreModeSwitch current="sky" tone="overlay" className={styles.modeSwitch} />
       )}
 
       <div className={styles.hint}>
