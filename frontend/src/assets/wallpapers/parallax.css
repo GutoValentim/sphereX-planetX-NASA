@@ -59,19 +59,24 @@
   display: none;
 }
 
+/* The viewer keeps the solid page color from the design system. The star field sits on that, not on the photo. */
+:root[data-theme='dark'][data-page='viewer'] .secao-parallax {
+  display: none;
+}
+
 .parallax-content {
   position: relative;
   z-index: 2;
+  min-height: 100dvh;
+  overflow: clip;
 }
 
 /* Horizontal drift only. Upper clouds stay in the side margins so they miss the hero text. */
 .clouds {
   position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 1;
-  width: 100%;
-  height: 0;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
   pointer-events: none;
 }
 
@@ -148,6 +153,3 @@
   }
 }
 
-#root {
-  overflow-x: clip;
-}

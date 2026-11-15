@@ -29,7 +29,7 @@ function HeroSection() {
     <section ref={sectionRef} className={styles.hero} aria-labelledby="hero-title">
       {backdrop ? createPortal(<HeroBackground />, backdrop) : null}
       <div className={styles.content}>
-        <p className={styles.eyebrow}>T.A.R.S - Team for Advanced Research of Space</p>
+        <p className={styles.eyebrow}>T.A.R.S. - Team for Advanced Research of Space</p>
         <h1 id="hero-title" className={styles.title}>
           CosmoSPHERE
         </h1>
@@ -37,12 +37,11 @@ function HeroSection() {
           SPHEREx Explorer
         </h1>
         <p className={styles.intro}>
-          Explore observations from NASA’s SPHEREx mission. Choose a position in the sky and a date, and Sky
-          Explorer shows what SPHEREx observed there.
+          Explore observations from NASA’s SPHEREx mission. Choose a position in the sky and CosmoSPHERE shows what SPHEREx observed there.
         </p>
         <div className={styles.actions}>
           <ButtonLink to={ROUTES.sky} size="lg">
-            Explore the sky <span aria-hidden="true">→</span>
+            Explore the cosmos <span aria-hidden="true">→</span>
           </ButtonLink>
           <ButtonLink to={ROUTES.explore} variant="secondary" size="lg">
             Search coordinates
