@@ -104,10 +104,20 @@ fi
 chown 1000:1000 "$base/api.env"
 chmod 600 "$base/api.env"
 
-legacy_release=$(readlink -f "$base/current" || true)
-previous_api=$(readlink -f "$base/current-api" || true)
-previous_frontend=$(readlink -f "$base/current-frontend" || true)
+resolve_release_link() {
+  local release=
+  if [[ -L $1 ]]; then
+    release=$(readlink -f "$1" || true)
+  fi
+  if [[ -d $release ]]; then
+    printf '%s' "$release"
+  fi
+}
+
+legacy_release=$(resolve_release_link "$base/current")
+previous_api=$(resolve_release_link "$base/current-api")
 previous_api=${previous_api:-$legacy_release}
+previous_frontend=$(resolve_release_link "$base/current-frontend")
 previous_frontend=${previous_frontend:-$legacy_release}
 previous_api_sha=
 previous_frontend_sha=
