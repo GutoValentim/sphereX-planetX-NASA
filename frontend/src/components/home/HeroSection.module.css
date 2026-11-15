@@ -40,3 +40,10 @@
   font-size: var(--font-size-lg);
   line-height: var(--line-height-base);
 }
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-3);
+}

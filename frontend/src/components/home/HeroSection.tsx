@@ -16,9 +16,14 @@ function HeroSection() {
           Explore observations from NASA’s SPHEREx mission. Choose a position in the sky and a date, and Sky
           Explorer shows what SPHEREx observed there.
         </p>
-        <ButtonLink to={ROUTES.explore} size="lg">
-          Start Exploring <span aria-hidden="true">→</span>
-        </ButtonLink>
+        <div className={styles.actions}>
+          <ButtonLink to={ROUTES.sky} size="lg">
+            Explore the sky <span aria-hidden="true">→</span>
+          </ButtonLink>
+          <ButtonLink to={ROUTES.explore} variant="secondary" size="lg">
+            Search coordinates
+          </ButtonLink>
+        </div>
       </div>
     </section>
   );

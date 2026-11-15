@@ -1,8 +1,12 @@
 export const ROUTES = {
   home: '/',
   explore: '/explore',
+  sky: '/explore-map',
   viewer: '/viewer',
 } as const;
+
+/** Query flag set when the viewer was opened from the sky sphere. It does not change the observation. */
+export const VIEWER_ENTRY_MAP = 'map';
 
 export type AppRoute = (typeof ROUTES)[keyof typeof ROUTES];
 
