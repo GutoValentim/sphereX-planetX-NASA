@@ -36,7 +36,9 @@ navegador ─▶ server.py (gateway :8765)
 | `exports/<v>/<slug>/` | `manifest.json` + `frames/` + `spectrum/` (hardlinks do cache) |
 | `auth.json`, `CREDENTIALS.txt` | credenciais geradas no primeiro start (só com `SPHEREX_LAB_AUTH=required`) |
 
-Em produção: `/opt/docker/spherex/lab` (montado em `/data`).
+Em produção: `/opt/docker/spherex/lab` (montado em `/data`). O cabeçalho do lab
+mostra o espaço livre em disco: cada alvo mapeado em um FOV ocupa da ordem de
+1 GB (FITS, matrizes alinhadas e WebPs), e a VPS é compartilhada com outros projetos.
 
 ## Versões do motor
 

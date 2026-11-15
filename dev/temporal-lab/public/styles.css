@@ -89,6 +89,8 @@ h3 { margin-bottom: 0; font-size: 1.02rem; }
   line-height: 1.3;
 }
 .status-pill.online { color: var(--accent); border-color: rgba(133, 242, 208, .3); }
+.status-pill.warning { color: var(--warn); border-color: rgba(251, 191, 36, .45); }
+.status-row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .fixed-config { max-width: 100%; }
 
 .engine-picker { display: flex; align-items: center; gap: 8px; }

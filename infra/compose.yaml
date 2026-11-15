@@ -127,7 +127,8 @@ services:
       SPHEREX_RELEASE_ENV: /app/.release.env
     pids_limit: 512
     mem_limit: 3g
-    cpus: 1.5
+    # VPS com 2 CPUs compartilhadas: o mapeamento é mais rede que CPU.
+    cpus: 1.0
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import json,urllib.request;v=dict(l.strip().split('=',1) for l in open('/app/.release.env') if '=' in l)['GIT_SHA'];r=json.load(urllib.request.urlopen('http://127.0.0.1:8765/api/health?light=1',timeout=2));raise SystemExit(r.get('version')!=v)"]
       interval: 10s

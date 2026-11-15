@@ -572,6 +572,15 @@ QUEUE: MappingQueue
 AUTH: BasicAuth
 
 
+def disk_usage() -> dict[str, float]:
+    usage = shutil.disk_usage(DATA_ROOT)
+    return {
+        "free_gb": round(usage.free / 1e9, 1),
+        "total_gb": round(usage.total / 1e9, 1),
+        "used_percent": round(100 * usage.used / usage.total, 1),
+    }
+
+
 def coverage_for(record: dict[str, Any], engine_id: str, scan: dict | None = None) -> dict[str, Any]:
     scan = scan if scan is not None else ENGINES.index(engine_id).scan()
     entry = scan.get(coordinate_key(record["ra_deg"], record["dec_deg"]))
@@ -707,6 +716,7 @@ class LabHandler(BaseHTTPRequestHandler):
             "current_code": {"hash": REGISTRY.current_hash, "frozen": REGISTRY.has_current_code()},
             "settings": settings,
             "auth": AUTH.required,
+            "disk": disk_usage(),
         })
 
     def _engines(self, method: str, rest: list[str]) -> None:

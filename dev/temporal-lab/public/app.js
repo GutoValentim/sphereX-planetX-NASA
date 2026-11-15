@@ -17,6 +17,7 @@ const elements = {
   searchButton: $("#searchButton"),
   mapCurrent: $("#mapCurrentButton"),
   serviceStatus: $("#serviceStatus"),
+  diskStatus: $("#diskStatus"),
   engineSelect: $("#engineSelect"),
   engineBanner: $("#engineBanner"),
   totalTimer: $("#totalTimer"),
@@ -1417,6 +1418,14 @@ async function loadHealth() {
   if (health.settings) applyCatalog(health.settings);
   renderEngineSelect();
   elements.serviceStatus.textContent = `Online${health.version ? ` · ${health.version.slice(0, 7)}` : ""}`;
+  if (health.disk) {
+    const low = health.disk.free_gb < 10;
+    elements.diskStatus.hidden = false;
+    elements.diskStatus.classList.toggle("warning", low);
+    elements.diskStatus.textContent = `Disco: ${decimal(health.disk.free_gb, 1)} GB livres`;
+    elements.diskStatus.title = `${decimal(health.disk.used_percent, 1)}% de ${decimal(health.disk.total_gb, 0)} GB usados. `
+      + "Cada alvo mapeado em um FOV ocupa da ordem de 1 GB (FITS + matrizes alinhadas + imagens).";
+  }
   elements.serviceStatus.classList.add("online");
   return health;
 }
