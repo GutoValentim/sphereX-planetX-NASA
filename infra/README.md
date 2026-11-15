@@ -1,34 +1,36 @@
 # SPHEREx na VPS Oracle
 
-Esta stack usa a rede externa `web` e o Traefik já existente. Não publica portas adicionais no host e não recria outros projetos. O Compose é exclusivo deste projeto; não execute `docker compose down` no diretório das outras aplicações.
+Esta stack tem três serviços: `frontend` e `api` (Node, publicados pelo Traefik) e `python` (FastAPI, sem publicação). Usa a rede externa `web` e o Traefik já existente; `api` e `python` também compartilham a rede privada `spherex_internal`, pela qual a API chama `http://spherex-python:8000`. Não publica portas adicionais no host e não recria outros projetos. O Compose é exclusivo deste projeto; não execute `docker compose down` no diretório das outras aplicações.
 
 ## Pipeline
 
 `.github/workflows/ci-cd.yml` valida PRs destinados à `main` e todo push na `main` em três jobs independentes:
 
 - **Backend:** instala as dependências Node, executa ESLint, TypeScript, testes da API e build.
+- **Python:** instala `backend/requirements-dev.txt` e executa os testes do núcleo científico e do FastAPI.
 - **Frontend:** instala as dependências Node, executa ESLint, TypeScript, testes do servidor e build Vite.
 - **Infra:** verifica a sintaxe dos scripts Bash e executa os testes Python de deploy.
 
-Se arquivos de backend ou frontend mudarem sem alterações em `infra/`, o serviço correspondente é publicado quando seu próprio CI passar, independentemente do resultado do outro projeto. Alterações em `infra/` acionam um deploy da stack inteira e exigem sucesso dos três CIs. A execução manual também valida e publica a stack inteira. PRs apenas validam; o merge gera o push que publica.
+Arquivos `backend/**/*.py` e `backend/requirements*.txt` pertencem ao serviço Python; o restante de `backend/` pertence à API Node. Se arquivos de um serviço mudarem sem alterações em `infra/`, esse serviço é publicado quando seu próprio CI passar, independentemente dos demais. Alterações em `infra/` acionam um deploy da stack inteira e exigem sucesso de todos os CIs. A execução manual também valida e publica a stack inteira. PRs apenas validam; o merge gera o push que publica.
 
-Após o CI passar, o job de deploy usa uma chave SSH exclusiva do usuário `spherex-deploy`. A chave aceita somente `deploy <SHA de 40 caracteres> [api|frontend|stack]`; não abre shell, SFTP, túnel ou encaminhamento de portas. O secret `SPHEREX_SSH_PRIVATE_KEY` já foi configurado no repositório. A chave local está em `~/.ssh/spherex_github_actions_ed25519`; não a versione. `ssh_known_hosts` contém somente as chaves públicas do servidor já confiadas por este Mac.
+Após o CI passar, o job de deploy usa uma chave SSH exclusiva do usuário `spherex-deploy`. A chave aceita somente `deploy <SHA de 40 caracteres> [api|frontend|python|stack]`; não abre shell, SFTP, túnel ou encaminhamento de portas. O secret `SPHEREX_SSH_PRIVATE_KEY` já foi configurado no repositório. A chave local está em `~/.ssh/spherex_github_actions_ed25519`; não a versione. `ssh_known_hosts` contém somente as chaves públicas do servidor já confiadas por este Mac.
 
 A VPS busca o repositório público por HTTPS e publica exatamente o commit aprovado. Um lock na VPS serializa deploys. Execuções de commits superados pela `main` são ignoradas para evitar regressão por ordem de conclusão do CI.
 
-O build de cada serviço roda em um container temporário `node:24-bookworm-slim` com limite de 1 GB e 1 CPU. O deploy de API compila somente o backend; o de frontend compila somente o frontend. Um deploy de stack prepara ambos. Todos instalam pelo lockfile e removem dependências de desenvolvimento. Os containers finais usam a mesma imagem oficial; não há imagem própria, registry ou `npm run dev` em produção. Os dois serviços rodam sem root, com filesystem e código somente leitura, limites de memória/CPU e logs rotacionados.
+O build dos serviços Node roda em um container temporário `node:24-bookworm-slim` com limite de 1 GB e 1 CPU. O deploy de API compila somente o backend; o de frontend compila somente o frontend. Ambos instalam pelo lockfile e removem dependências de desenvolvimento. O build Python roda em `python:3.12-slim-bookworm` (2 GB, 1 CPU) e cria um venv em `/app/.venv` dentro da release com `backend/requirements.txt`. Um deploy de stack prepara os três. Os containers finais usam as mesmas imagens oficiais; não há imagem própria, registry ou servidor de desenvolvimento em produção. Todos rodam sem root, com filesystem e código somente leitura, limites de memória/CPU e logs rotacionados. O Python tem 2 GB/1 CPU e grava apenas em `/opt/docker/spherex/cache` (montado em `/cache`) e no `/tmp` em memória.
 
-As releases ficam em `/opt/docker/spherex/releases/api/<SHA>` e `/opt/docker/spherex/releases/frontend/<SHA>`. Os links `/opt/docker/spherex/current-api` e `/opt/docker/spherex/current-frontend` são atualizados atomicamente; um deploy de serviço recria somente esse container, enquanto um deploy de stack recria ambos. Cada serviço mantém sua própria versão, indicada por seu `/healthz`. Existe uma breve interrupção durante a recriação do serviço atualizado; este fluxo não oferece zero downtime.
+As releases ficam em `/opt/docker/spherex/releases/<api|frontend|python>/<SHA>`. Os links `/opt/docker/spherex/current-api`, `current-frontend` e `current-python` são atualizados atomicamente; um deploy de serviço recria somente esse container, enquanto um deploy de stack recria todos. Cada serviço mantém sua própria versão, indicada por seu `/healthz`. Existe uma breve interrupção durante a recriação do serviço atualizado; este fluxo não oferece zero downtime.
 
-O SHA vem do arquivo gerado `.release.env`, incluído em cada release. Se a subida ou o healthcheck falhar, o script restaura a release anterior do serviço; em deploy de stack, também restaura o Compose anterior. Se o build falhar, as versões em execução permanecem ativas. Para cada serviço, são mantidas as releases ativa e anterior, além das três outras mais recentes.
+O SHA vem do arquivo gerado `.release.env`, incluído em cada release. Se a subida ou o healthcheck falhar, o script restaura a release anterior do serviço; em deploy de stack, também restaura o Compose anterior. Um serviço sem release anterior (por exemplo, o primeiro deploy do Python) é removido no rollback. Se o build falhar, as versões em execução permanecem ativas. Para cada serviço, são mantidas as releases ativa e anterior, além das três outras mais recentes.
 
 ## Arquivos na VPS
 
 - `/opt/docker/spherex/compose.yaml`: Compose ativo, enviado inicialmente por SCP e atualizado a partir de cada release.
 - `/opt/docker/spherex/.env`: caminhos independentes da API e do frontend, mais os domínios; veja `.env.example`.
-- `/opt/docker/spherex/api.env`: variáveis privadas da API; veja `api.env.example`. `PYTHON_API_URL` começa vazia. O arquivo pertence ao UID/GID 1000, com permissão 600, e é montado somente na API como somente leitura. O Node carrega esse arquivo diretamente, sem o Portainer precisar ler o caminho do host.
+- `/opt/docker/spherex/api.env`: variáveis privadas da API; veja `api.env.example`. `PYTHON_API_URL` vem do `compose.yaml`, não deste arquivo. O arquivo pertence ao UID/GID 1000, com permissão 600, e é montado somente na API como somente leitura. O Node carrega esse arquivo diretamente, sem o Portainer precisar ler o caminho do host.
 - `/opt/docker/spherex/repository.git`: clone bare do repositório público.
-- `/opt/docker/spherex/api-current-sha` e `/opt/docker/spherex/frontend-current-sha`: últimas releases publicadas de cada serviço.
+- `/opt/docker/spherex/api-current-sha`, `frontend-current-sha` e `python-current-sha`: últimas releases publicadas de cada serviço.
+- `/opt/docker/spherex/cache`: cache gravável do Python (UID 1000); pode ser apagado, tudo é regenerável.
 - `/opt/docker/spherex/current-sha`: SHA do último deploy concluído.
 - `/usr/local/sbin/spherex-deploy`: cópia root-owned de `deploy.sh`.
 - `/usr/local/bin/spherex-ssh-deploy`: cópia root-owned do comando SSH restrito.
@@ -49,7 +51,7 @@ ssh ubuntu@150.230.73.212 'sudo install -o root -g root -m 755 /tmp/deploy.sh /u
 
 Stack `spherex`, ambiente `local`. O Compose usa binds fixos para `/opt/docker/spherex/current-api` e `/opt/docker/spherex/current-frontend`, portanto cada serviço pode atualizar sua versão sem recriar o outro. A pipeline recria os serviços pelo Docker Compose no mesmo projeto que o Portainer gerencia. Não é necessário token administrativo do Portainer no Actions.
 
-Se alterar `infra/compose.yaml`, a pipeline aplica o novo arquivo na VPS; atualize também a definição salva no editor da stack antes de fazer um redeploy manual pelo Portainer. Um redeploy manual pela interface usa as releases apontadas pelos links `current-api` e `current-frontend` e a definição salva no Portainer. O script instalado aplica a definição do commit selecionado.
+Se alterar `infra/compose.yaml`, a pipeline aplica o novo arquivo na VPS; atualize também a definição salva no editor da stack antes de fazer um redeploy manual pelo Portainer. Um redeploy manual pela interface usa as releases apontadas pelos links `current-api`, `current-frontend` e `current-python` e a definição salva no Portainer. O script instalado aplica a definição do commit selecionado.
 
 ## DNS e TLS
 
@@ -81,6 +83,7 @@ sudo docker compose --project-name spherex --env-file /opt/docker/spherex/.env -
 sudo cat /opt/docker/spherex/current-sha
 sudo cat /opt/docker/spherex/api-current-sha
 sudo cat /opt/docker/spherex/frontend-current-sha
+sudo cat /opt/docker/spherex/python-current-sha
 ```
 
 Para rollback administrativo, substitua `SHA_ANTERIOR` por um commit completo que ainda pertence à `main`:

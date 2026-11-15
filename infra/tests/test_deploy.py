@@ -19,10 +19,18 @@ class DeployTests(unittest.TestCase):
         self.previous_frontend = self.base / "releases" / "frontend" / self.previous_sha
         self.api_release = self.base / "releases" / "api" / self.sha
         self.frontend_release = self.base / "releases" / "frontend" / self.sha
-        for release in (self.legacy_release, self.previous_api, self.previous_frontend):
+        self.previous_python = self.base / "releases" / "python" / self.previous_sha
+        self.python_release = self.base / "releases" / "python" / self.sha
+        for release in (
+            self.legacy_release,
+            self.previous_api,
+            self.previous_frontend,
+            self.previous_python,
+        ):
             self.add_release(release, self.previous_sha)
         self.add_release(self.api_release, self.sha, compose="candidate compose\n")
         self.add_release(self.frontend_release, self.sha)
+        self.add_release(self.python_release, self.sha)
         (self.base / "compose.yaml").write_text("previous compose\n")
         (self.base / ".env").write_text(
             f"SPHEREX_RELEASE_DIR={self.base}/current\n"
@@ -69,7 +77,7 @@ with (b / "docker.log").open("a") as log:
     log.write(" ".join(args) + "\\n")
 if "up" in args and os.environ.get("FAIL_CANDIDATE") == "1":
     candidate = os.environ["TEST_SHA"]
-    services = [name for name in ("api", "frontend") if name in args]
+    services = [name for name in ("api", "frontend", "python") if name in args]
     for service in services:
         current = b / ("current-" + service)
         if current.exists() and current.resolve().name == candidate:
@@ -109,16 +117,19 @@ if args and args[0] == "inspect":
         path.write_text(content)
         path.chmod(0o755)
 
-    def prepare_independent_layout(self):
+    def prepare_independent_layout(self, python=True):
         (self.base / "current-api").symlink_to(self.previous_api)
         (self.base / "current-frontend").symlink_to(self.previous_frontend)
-        (self.base / ".env").write_text(
+        env = (
             f"SPHEREX_API_RELEASE_DIR={self.base}/current-api\n"
             f"SPHEREX_FRONTEND_RELEASE_DIR={self.base}/current-frontend\n"
-            "FRONTEND_DOMAIN=front.example\nAPI_DOMAIN=api.example\n"
         )
+        if python:
+            (self.base / "current-python").symlink_to(self.previous_python)
+            env += f"SPHEREX_PYTHON_RELEASE_DIR={self.base}/current-python\n"
+        (self.base / ".env").write_text(env + "FRONTEND_DOMAIN=front.example\nAPI_DOMAIN=api.example\n")
         (self.base / "compose.yaml").write_text(
-            "SPHEREX_API_RELEASE_DIR\nSPHEREX_FRONTEND_RELEASE_DIR\n"
+            "SPHEREX_API_RELEASE_DIR\nSPHEREX_FRONTEND_RELEASE_DIR\nSPHEREX_PYTHON_RELEASE_DIR\n"
         )
 
     def run_deploy(self, sha=None, scope="stack"):
@@ -130,17 +141,70 @@ if args and args[0] == "inspect":
             timeout=10,
         )
 
-    def test_stack_deploy_switches_both_releases_and_records_sha(self):
+    def test_stack_deploy_switches_all_releases_and_records_sha(self):
         result = self.run_deploy()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.base / "current-api").resolve(), self.api_release)
         self.assertEqual((self.base / "current-frontend").resolve(), self.frontend_release)
-        self.assertEqual((self.base / "api-current-sha").read_text().strip(), self.sha)
-        self.assertEqual((self.base / "frontend-current-sha").read_text().strip(), self.sha)
+        self.assertEqual((self.base / "current-python").resolve(), self.python_release)
+        for marker in ("api", "frontend", "python"):
+            self.assertEqual((self.base / f"{marker}-current-sha").read_text().strip(), self.sha)
         self.assertEqual((self.base / "current-sha").read_text().strip(), self.sha)
         self.assertEqual((self.base / "compose.yaml").read_text(), "candidate compose\n")
-        self.assertIn("SPHEREX_API_RELEASE_DIR=", (self.base / ".env").read_text())
-        self.assertIn("api frontend", (self.base / "docker.log").read_text())
+        env = (self.base / ".env").read_text()
+        self.assertIn("SPHEREX_API_RELEASE_DIR=", env)
+        self.assertIn(f"SPHEREX_PYTHON_RELEASE_DIR={self.base}/current-python", env)
+        log = (self.base / "docker.log").read_text()
+        self.assertIn("up -d --force-recreate --wait --wait-timeout 120 api frontend python", log)
+        self.assertIn("exec -e EXPECTED_GIT_SHA=" + self.sha + " container-python /app/.venv/bin/python", log)
+        self.assertTrue((self.base / "cache").is_dir())
+
+    def test_python_deploy_leaves_node_services_unchanged(self):
+        self.prepare_independent_layout()
+        result = self.run_deploy(scope="python")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.base / "current-python").resolve(), self.python_release)
+        self.assertEqual((self.base / "current-api").resolve(), self.previous_api)
+        self.assertEqual((self.base / "current-frontend").resolve(), self.previous_frontend)
+        self.assertEqual((self.base / "python-current-sha").read_text().strip(), self.sha)
+        log = (self.base / "docker.log").read_text()
+        self.assertIn("up -d --force-recreate --wait --wait-timeout 120 python", log)
+        self.assertNotIn("wait-timeout 120 api", log)
+
+    def test_python_deploy_requires_a_stack_with_python(self):
+        self.prepare_independent_layout(python=False)
+        result = self.run_deploy(scope="python")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("stack deployment is required", result.stderr)
+
+    def test_python_deploy_is_skipped_only_by_later_python_changes(self):
+        self.prepare_independent_layout()
+        self.env["LATEST_SHA"] = "c" * 40
+        self.env["CHANGED_SINCE_TARGET"] = "backend/app/api/server.ts\nfrontend/src/App.tsx"
+        result = self.run_deploy(scope="python")
+        self.assertIn("SPHEREx python deployed", result.stdout, result.stderr)
+
+        self.env["CHANGED_SINCE_TARGET"] = "backend/app/services/irsa_client.py"
+        result = self.run_deploy(scope="python")
+        self.assertIn("Skipped superseded python commit", result.stdout)
+
+    def test_api_deploy_is_allowed_after_python_only_changes(self):
+        self.prepare_independent_layout()
+        self.env["LATEST_SHA"] = "c" * 40
+        self.env["CHANGED_SINCE_TARGET"] = "backend/requirements.txt\nbackend/app/main.py"
+        result = self.run_deploy(scope="api")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SPHEREx api deployed", result.stdout)
+
+    def test_failed_first_python_stack_deploy_removes_python_and_restores_node(self):
+        self.env["FAIL_CANDIDATE"] = "1"
+        result = self.run_deploy()
+        self.assertEqual(result.returncode, 42, result.stderr)
+        self.assertFalse((self.base / "current-python").exists())
+        log = (self.base / "docker.log").read_text().splitlines()
+        self.assertTrue(any(line.endswith(" rm -sf python") for line in log), log)
+        rollback_up = [line for line in log if "up -d" in line][-1]
+        self.assertTrue(rollback_up.endswith("--wait-timeout 120 api frontend"), rollback_up)
 
     def test_api_deploy_leaves_frontend_release_unchanged(self):
         self.prepare_independent_layout()
@@ -197,6 +261,7 @@ if args and args[0] == "inspect":
         self.assertEqual(result.returncode, 42, result.stderr)
         self.assertEqual((self.base / "current-api").resolve(), self.legacy_release)
         self.assertEqual((self.base / "current-frontend").resolve(), self.legacy_release)
+        self.assertFalse((self.base / "current-python").exists())
         self.assertEqual((self.base / "compose.yaml").read_text(), "previous compose\n")
         self.assertIn("SPHEREX_RELEASE_DIR", (self.base / ".env").read_text())
         self.assertIn("restoring the previous", result.stderr)
@@ -221,7 +286,7 @@ if args and args[0] == "inspect":
 
     def test_ssh_wrapper_accepts_only_known_deploy_scopes(self):
         wrapper = Path(__file__).parents[1] / "ssh-deploy.sh"
-        for scope in ("api", "frontend", "stack"):
+        for scope in ("api", "frontend", "python", "stack"):
             self.env["SSH_ORIGINAL_COMMAND"] = f"deploy {self.sha} {scope}"
             result = subprocess.run(
                 ["bash", str(wrapper)],
@@ -263,7 +328,7 @@ if args and args[0] == "inspect":
             text=True,
         ).strip()
         self.env["TEST_SHA"] = self.sha
-        for attribute in ("api_release", "frontend_release"):
+        for attribute in ("api_release", "frontend_release", "python_release"):
             old_path = getattr(self, attribute)
             new_path = old_path.with_name(self.sha)
             old_path.rename(new_path)

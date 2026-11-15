@@ -32,6 +32,9 @@ services:
       NODE_ENV: production
       PORT: "3000"
       FRONTEND_ORIGIN: https://${FRONTEND_DOMAIN:-spherex.prospectordigital.com.br}
+      # Tem precedência sobre api.env: o serviço Python só é alcançável pela rede interna.
+      PYTHON_API_URL: http://spherex-python:8000
+    networks: [web, internal]
     healthcheck:
       test: ["CMD", "node", "--env-file=/app/.release.env", "-e", "fetch('http://127.0.0.1:3000/healthz').then(async r=>{if(!r.ok||(await r.json()).version!==process.env.GIT_SHA)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s
@@ -72,6 +75,38 @@ services:
       traefik.http.routers.spherex-frontend.service: spherex-frontend
       traefik.http.services.spherex-frontend.loadbalancer.server.port: "8080"
 
+  python:
+    <<: *runtime
+    image: python:3.12-slim-bookworm
+    # Sem labels do Traefik: o serviço não é publicado; só a API Node o acessa.
+    command: ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    working_dir: /app/backend
+    volumes:
+      - ${SPHEREX_PYTHON_RELEASE_DIR:-/opt/docker/spherex/current-python}:/app:ro
+      - /opt/docker/spherex/cache:/cache
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    environment:
+      HOME: /tmp
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      SPHEREX_CACHE_DIR: /cache/temporal
+      SPHEREX_RELEASE_ENV: /app/.release.env
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 1.0
+    networks:
+      internal:
+        aliases: [spherex-python]
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import json,urllib.request;v=dict(l.strip().split('=',1) for l in open('/app/.release.env') if '=' in l)['GIT_SHA'];r=json.load(urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=2));raise SystemExit(r.get('version')!=v)"]
+      interval: 10s
+      timeout: 3s
+      start_period: 20s
+      retries: 5
+
 networks:
   web:
     external: true
+  # Rede privada do projeto (Node <-> Python). Mantém saída para a internet (IRSA).
+  internal: {}
