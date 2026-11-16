@@ -1,7 +1,9 @@
-# Backend científico
+# Backend científico — CosmoSPHERE
 
 Serviços Python que consultam e processam dados da SPHEREx, expostos à API Node
-pelo FastAPI em `app/main.py` (contratos em `docs/api.md`).
+pelo FastAPI em `app/main.py` (contratos em [docs/api.md](../docs/api.md)).
+A API pública Node/Express fica em `app/api/server.ts` → `app/api/resultados.ts`;
+o Python permanece na rede interna em produção.
 
 ```sh
 cd backend
@@ -18,10 +20,11 @@ python -m unittest discover -s tests -p 'test_*.py'
 - `numpy`: normalização e transformação matricial da extensão `IMAGE`;
 - `Pillow`: codificação dos frames em PNG, WebP ou JPEG;
 - `requests`: download HTTPS dos arquivos e cutouts FITS.
-- `reproject`: reprojeção de cada FITS para uma grade WCS celeste comum.
+- `reproject`: reprojeção de cada FITS para uma grade WCS celeste comum;
+- `scipy`: filtros, preenchimento de núcleos saturados e operações de imagem;
+- `FastAPI`, `Pydantic` e `uvicorn`: HTTP interno, validação e servidor ASGI.
 
-As demais bibliotecas científicas serão adicionadas quando houver uso direto no
-código.
+Versões suportadas em [`requirements.txt`](requirements.txt).
 
 ## Serviços implementados
 
@@ -41,8 +44,8 @@ código.
 - `SpherexImageService.create_preview`: recebe RA, Dec e FOV, seleciona uma
   observação compatível, baixa o cutout e devolve a imagem com seus metadados.
 - `SpherexTemporalSequenceService.create_sequence`: recebe RA e Dec, consulta o
-  SIA2 novamente, seleciona até 100 observações D3 que cobrem integralmente o FOV
-  final de 30 arcmin, baixa cutouts-fonte de 45 arcmin em paralelo e gera uma
+  SIA2, seleciona até 100 observações D3 cujas pegadas contêm integralmente o
+  recorte-fonte de 45 arcmin, baixa esses cutouts em paralelo e gera uma
   sequência WebP com manifesto JSON ordenado pelo horário de observação. A
   margem externa preserva a janela menor durante rotações de até qualquer ângulo.
 - `SpherexTemporalSequenceService.discover_dataset`: consulta apenas metadados e
@@ -53,6 +56,9 @@ código.
   índice solicitado pelo consumidor;
 - `SpherexTemporalSequenceService.clear_cache`: remove um dataset validado ou
   todos os artefatos regeneráveis da raiz de cache dedicada.
+- `SequenceJobManager`: gerencia as sequências multibanda em segundo plano,
+  escolhe as épocas na banda de referência (D3 por padrão), pareia as demais
+  pela observação mais próxima no tempo e publica as camadas conforme ficam prontas.
 
 O motor temporal reprojeta todos os frames para a mesma grade TAN e retorna
 `aligned: true`. A correção usa a WCS completa de cada FITS, incluindo a
@@ -122,3 +128,9 @@ falsa impressão de variação de brilho.
 O download aceita somente URLs HTTPS do domínio oficial
 `irsa.ipac.caltech.edu`. Para experimentação, prefira cutouts e limite a
 quantidade de arquivos baixados.
+
+## Referências
+
+- [Visão geral, configuração e equipe](../README.md).
+- [Contrato público da API](../docs/api.md), [arquitetura](../docs/architecture.md) e
+  [documentação técnica completa em inglês (PDF)](../docs/cosmosphere-technical-documentation-en.pdf).
