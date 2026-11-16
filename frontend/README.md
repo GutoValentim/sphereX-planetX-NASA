@@ -1,33 +1,33 @@
 # Frontend — CosmoSPHERE
 
-Interface React + TypeScript, construída com Vite. Permite explorar coordenadas ou o mapa do céu, comparar imagens SPHEREx entre épocas e consultar espectros. O processamento científico ocorre no backend; o frontend acompanha os jobs da API e exibe os resultados.
+React + TypeScript interface, built with Vite. Users explore coordinates or a sky map, compare SPHEREx images across epochs, and inspect spectra. Scientific processing occurs in the backend; the frontend follows API jobs and displays their results.
 
-## Páginas
+## Pages
 
-| Rota | Página | Função |
+| Route | Page | Purpose |
 |---|---|---|
-| `/` | `Home` | Apresentação, instruções e equipe T.A.R.S. |
-| `/explore` | `ExploreTheSky` | Formulário de coordenadas e alvos pré-mapeados |
-| `/explore-map` | `ExploreMap` | Esfera do céu WebGL e seleção de posições |
-| `/viewer` | `SeeTheSky` | Imagens, linha do tempo, bandas e espectro |
+| `/` | `Home` | Introduction, instructions, T.A.R.S. team |
+| `/explore` | `ExploreTheSky` | Coordinate form and pre-mapped targets |
+| `/explore-map` | `ExploreMap` | WebGL celestial sphere and position selection |
+| `/viewer` | `SeeTheSky` | Images, timeline, bands, spectrum |
 
-A consulta é transportada nos parâmetros de `/viewer`: `ra`, `dec`, `band`, `date`, `target` e `entry`. As rotas são definidas em [`src/routes/paths.ts`](src/routes/paths.ts).
+The query is carried by `/viewer` parameters: `ra`, `dec`, `band`, `date`, `target`, `entry`. Routes are defined in [`src/routes/paths.ts`](src/routes/paths.ts).
 
-## Organização e fluxo de dados
+## Organization and data flow
 
-- `src/pages/` e `src/components/`: páginas e componentes; `ObservationWorkspace` coordena as fontes, abas e modos do visualizador.
-- `src/services/api.ts`: consultas à API Node; imagens usam `modo=balanceada`, todas as bandas e uma banda de referência. Jobs são acompanhados até terminarem.
-- `src/services/catalog.ts` e `src/hooks/useCatalog.ts`: catálogo e manifestos exportados pelo laboratório; um alvo já mapeado usa esses artefatos, com consulta ao vivo para as partes ausentes.
-- `src/hooks/`: formulário, linha do tempo, seleção de bandas, espectro e polling. A consulta ativa fica na URL; tema em Context; histórico e preferência de tema em `localStorage`.
-- `src/components/sky-map/`: esfera WebGL e marcadores. `integrations/aladin.ts` e `integrations/plotly.ts` carregam bibliotecas sob demanda.
-- `src/constants/homeContent.ts`: apresentação e integrantes da equipe. `src/constants/uiFeatures.ts`: flags da interface.
-- CSS Modules e `src/styles/`: estilos. Consulte o [design system](../docs/DESIGN_SYSTEM.md).
+- `src/pages/` and `src/components/`: pages and components; `ObservationWorkspace` coordinates viewer sources, tabs, and modes.
+- `src/services/api.ts`: Node API queries; images use `modo=balanceada`, all bands, and an anchor band. Jobs are polled to completion.
+- `src/services/catalog.ts` and `src/hooks/useCatalog.ts`: laboratory-exported catalog and manifests. Mapped targets use those artifacts, with live-query fallback for missing portions.
+- `src/hooks/`: form, timeline, band selection, spectrum, polling. The active query lives in the URL, theme in Context, and history/theme preference in `localStorage`.
+- `src/components/sky-map/`: WebGL sphere and markers. `integrations/aladin.ts` and `integrations/plotly.ts` load libraries on demand.
+- `src/constants/homeContent.ts`: introduction and team. `src/constants/uiFeatures.ts`: UI flags.
+- CSS Modules and `src/styles/`: styles. See the [design system](../docs/DESIGN_SYSTEM.md).
 
-O visualizador combina camadas em falsa cor com `mix-blend-mode: screen`. A imagem DSS2/Aladin é uma referência óptica, separada dos dados SPHEREx. A galeria de espectros usa SVGs do backend; Plotly é uma alternativa controlada por flag.
+The viewer combines false-color layers using `mix-blend-mode: screen`. DSS2/Aladin supplies a separate optical reference, not SPHEREx data. The spectrum gallery uses backend SVGs; Plotly is an alternative behind a flag.
 
-## Comandos
+## Commands
 
-Na raiz do repositório, com Node.js 24 e dependências instaladas por `npm ci`:
+From the repository root, with Node.js 24 and dependencies installed through `npm ci`:
 
 ```sh
 npm run dev --workspace frontend       # Vite, http://localhost:5173
@@ -36,26 +36,26 @@ npm run build --workspace frontend    # frontend/dist/
 node --test frontend/tests/*.test.mjs
 ```
 
-Depois do build, o servidor usado em produção pode ser iniciado com:
+After building, start the production server locally with:
 
 ```sh
 node frontend/server.mjs              # Express, http://localhost:8080
 ```
 
-Esse servidor implementa fallback de SPA, arquivos estáticos e `GET /healthz`. O Vite de desenvolvimento não implementa esse healthcheck. Não há script `start` no `frontend/package.json` atual. Para a aplicação completa, inicie também API Node e Python conforme o [README principal](../README.md#rodar-localmente).
+This server implements SPA fallback, static files, and `GET /healthz`. The Vite development server does not implement that healthcheck. The current `frontend/package.json` has no `start` script. To run the complete application, also start Node and Python as described in the [main README](../README.md#running-locally).
 
-## Configuração
+## Configuration
 
-| Variável | Uso |
+| Variable | Use |
 |---|---|
-| `VITE_API_BASE_URL` | Base da API Node, padrão `http://localhost:3000` |
-| `VITE_CATALOG_URL` | URL do catálogo; padrão `/api/catalogo` na API. Valor vazio desativa os alvos pré-mapeados |
+| `VITE_API_BASE_URL` | Node API base URL; default `http://localhost:3000` |
+| `VITE_CATALOG_URL` | Catalog URL; default `/api/catalogo` on the API. An empty value disables pre-mapped targets |
 
-As variáveis `VITE_*` são lidas no build/desenvolvimento: defina-as no ambiente do processo ou em `frontend/.env.local`. O `vite.config.ts` atual não configura a raiz do repositório como `envDir`, portanto o `.env` da raiz não é a fonte dessas variáveis para o Vite. O CORS da API deve aceitar a origem usada pelo navegador (`FRONTEND_ORIGIN`).
+`VITE_*` variables are read during development/build: set them in the process environment or `frontend/.env.local`. The current `vite.config.ts` does not set the repository root as `envDir`, so root `.env` does not supply those variables to Vite. API CORS must accept the browser's origin (`FRONTEND_ORIGIN`).
 
-## Referências e limites
+## References and limits
 
-- [Contrato da API](../docs/api.md), [arquitetura](../docs/architecture.md) e [documentação técnica em inglês (PDF)](../docs/cosmosphere-technical-documentation-en.pdf).
-- [Especificação inicial](../docs/Sky_Explorer_Documentacao_Frontend.md): planejamento histórico; a implementação atual é descrita aqui e no código.
-- Os testes existentes cobrem o servidor Express; não há suíte de componentes/hooks.
-- A home inclui um exemplo de espectro explicitamente identificado como ilustrativo; os resultados científicos do visualizador vêm do IRSA ou das exportações do laboratório.
+- [API contract](../docs/api.md), [architecture](../docs/architecture.md), [complete English technical PDF](../docs/cosmosphere-technical-documentation-en.pdf).
+- [Initial specification](../docs/Sky_Explorer_Documentacao_Frontend.md): historical planning reference; current implementation is documented here and in code.
+- Existing tests cover the Express server; there is no component/hook test suite.
+- The home page includes a spectrum explicitly labeled as illustrative. Scientific viewer results come from IRSA or laboratory exports.

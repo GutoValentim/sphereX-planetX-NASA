@@ -1,143 +1,123 @@
 # SKY EXPLORER
 
-## Documentação de Produto e Especificação do Frontend
+## Product documentation and frontend specification
 
-**Projeto:** Sky Explorer --- NASA Space Apps Challenge\
-**Versão:** 1.0 \| **Status:** Planejamento para implementação\
-**Escopo:** Frontend em React + TypeScript + Vite
+**Project:** Sky Explorer — NASA Space Apps Challenge
+**Version:** 1.0 | **Status:** Historical implementation-planning reference
+**Scope:** React + TypeScript + Vite frontend
 
-------------------------------------------------------------------------
+This historical specification retains the original working name and proposed design. For the current CosmoSPHERE implementation, use [frontend/README.md](../frontend/README.md), the [design system](DESIGN_SYSTEM.md), and the [API contract](api.md).
 
-## 1. Visão geral
+---
 
-O **Sky Explorer** é uma aplicação web para exploração visual de
-observações astronômicas obtidas pelo telescópio espacial **SPHEREx**. O
-usuário informa coordenadas celestes e, opcionalmente, uma data; a
-aplicação solicita os dados ao backend e apresenta imagens, observações
-temporais, bandas espectrais, gráficos e metadados.
+## 1. Overview
 
-O frontend é responsável pela interface, interação, validação dos dados
-de entrada e apresentação dos resultados. A obtenção, calibração,
-combinação e processamento científico das imagens são responsabilidades
-do backend.
+**Sky Explorer** is a web application for visually exploring astronomical observations from the **SPHEREx** space telescope. Users enter celestial coordinates and optionally a date. The application requests backend data and displays images, temporal observations, spectral bands, charts, and metadata.
 
-### 1.1 Objetivos
+The frontend owns interface, interaction, input validation, and presentation. Data retrieval, calibration, combination, and scientific image processing belong to the backend.
 
-1.  Tornar a exploração de observações SPHEREx compreensível e
-    acessível.
-2.  Localizar regiões celestes por ascensão reta (RA) e declinação
-    (Dec).
-3.  Apresentar imagens e permitir navegar entre diferentes observações.
-4.  Permitir selecionar bandas espectrais disponíveis.
-5.  Exibir gráficos e metadados associados às observações.
-6.  Apresentar o contexto científico e institucional do projeto.
+### 1.1 Goals
 
-### 1.2 Princípios de experiência
+1. Make SPHEREx observation exploration understandable and accessible.
+2. Locate sky regions using right ascension (RA) and declination (Dec).
+3. Display images and navigate between observations.
+4. Select available spectral bands.
+5. Display observation-related charts and metadata.
+6. Present the project's scientific and institutional context.
 
--   **Clareza:** cada página deve ter uma finalidade evidente.
--   **Consistência:** navegação, cores, tipografia e controles devem
-    seguir um sistema comum.
--   **Feedback:** ações devem apresentar estados de carregamento,
-    sucesso, ausência de dados ou erro.
--   **Progressividade:** priorizar informações essenciais e evitar
-    sobrecarga visual.
--   **Responsividade:** manter a usabilidade em desktop e dispositivos
-    móveis.
--   **Integridade científica:** nunca apresentar dados simulados como
-    observações reais.
+### 1.2 Experience principles
 
-------------------------------------------------------------------------
+- **Clarity:** every page has an obvious purpose.
+- **Consistency:** navigation, colors, typography, controls follow a shared system.
+- **Feedback:** actions expose loading, success, empty, or error states.
+- **Progressive disclosure:** prioritize essential information and avoid visual overload.
+- **Responsiveness:** remain usable on desktop and mobile.
+- **Scientific integrity:** never present simulated data as real observations.
 
-## 2. Escopo e responsabilidades
+---
 
-### 2.1 Escopo desta etapa
+## 2. Scope and responsibilities
 
-Construir a base do frontend:
+### 2.1 Scope of this stage
 
--   Estrutura de pastas e organização modular.
--   Configuração React, TypeScript e Vite.
--   Navegação entre páginas.
--   Temas claro e escuro.
--   Componentes visuais reutilizáveis.
--   Página inicial.
--   Formulário de coordenadas e parâmetros.
--   Estrutura da página de visualização astronômica.
--   Componentes preparados para Aladin Lite e Plotly.
--   Estrutura da linha temporal.
--   Estados de interface e dados simulados claramente identificados,
-    quando necessários.
+Build the frontend foundation:
 
-A prioridade é uma base funcional, organizada e extensível. Integrações
-reais poderão ser concluídas posteriormente, conforme a disponibilidade
-dos endpoints e contratos do backend.
+- Folder structure and modular organization.
+- React, TypeScript, Vite setup.
+- Page navigation.
+- Light/dark themes.
+- Reusable visual components.
+- Home page.
+- Coordinate/parameter form.
+- Astronomical viewer page structure.
+- Components prepared for Aladin Lite and Plotly.
+- Timeline structure.
+- Interface states and clearly identified simulated data when needed.
 
-### 2.2 Fora do escopo inicial
+Prioritize a functional, organized, extensible foundation. Complete live integrations later as backend endpoints and contracts become available.
 
-Não implementar nesta etapa, salvo solicitação explícita:
+### 2.2 Outside initial scope
 
--   Consultas completas a serviços externos da NASA ou IRSA.
--   Download e processamento de arquivos FITS.
--   Calibração, alinhamento, reamostragem ou subtração de imagens.
--   Soma científica de bandas espectrais.
--   Cálculo de espectros ou métricas astronômicas.
--   Criação de dados científicos fictícios.
--   Alterações estruturais amplas no backend.
+Unless explicitly requested, this stage excludes:
 
-### 2.3 Responsabilidades do frontend
+- Complete queries to NASA or IRSA services.
+- FITS downloads and processing.
+- Calibration, alignment, resampling, image subtraction.
+- Scientific spectral-band summation.
+- Spectrum or astronomical-metric calculations.
+- Fabricated scientific data.
+- Broad backend restructuring.
 
--   Coletar e validar parâmetros.
--   Converter RA para graus decimais, conforme o contrato da API.
--   Enviar consultas ao backend por uma camada de serviços.
--   Interpretar respostas conforme os tipos definidos.
--   Exibir imagens, gráficos, metadados e observações.
--   Gerenciar navegação, seleções e estados da interface.
--   Apresentar mensagens de erro e carregamento.
+### 2.3 Frontend responsibilities
 
-### 2.4 Responsabilidades do backend
+- Collect and validate parameters.
+- Convert RA to decimal degrees according to the API contract.
+- Send queries through a service layer.
+- Interpret responses using defined types.
+- Display images, charts, metadata, observations.
+- Manage navigation, selections, UI state.
+- Present loading and error messages.
 
--   Consultar as fontes de dados astronômicos.
--   Localizar observações correspondentes às coordenadas e à data.
--   Processar e preparar imagens e metadados.
--   Disponibilizar resultados em formatos adequados ao frontend.
--   Informar bandas, datas, horários e metadados disponíveis.
--   Retornar erros estruturados.
+### 2.4 Backend responsibilities
 
-**Regra fundamental:** o frontend não deve presumir como os dados
-científicos são obtidos ou processados. Deve consumir os resultados
-efetivamente fornecidos pelo backend.
+- Query astronomical data sources.
+- Find observations matching coordinates/date.
+- Process and prepare images/metadata.
+- Provide results in frontend-compatible formats.
+- Report available bands, dates, times, metadata.
+- Return structured errors.
 
-------------------------------------------------------------------------
+**Core rule:** the frontend must not assume how scientific data are retrieved or processed. Consume results actually supplied by the backend.
 
-## 3. Tecnologias
+---
 
-  Tecnologia     Responsabilidade
-  -------------- -------------------------------------------------
-  React          Construção da interface por componentes
-  TypeScript     Tipagem e segurança em tempo de desenvolvimento
-  Vite           Ambiente de desenvolvimento e build
-  React Router   Navegação entre páginas
-  Aladin Lite    Visualização e navegação pelo céu
-  Plotly         Gráficos e visualização de dados
-  CSS            Estilização, responsividade e temas
+## 3. Technologies
 
-### 3.1 Diretrizes de dependências
+| Technology | Responsibility |
+|---|---|
+| React | Component-based UI |
+| TypeScript | Development-time typing and safety |
+| Vite | Development and build environment |
+| React Router | Page navigation |
+| Aladin Lite | Sky visualization and navigation |
+| Plotly | Charts and data visualization |
+| CSS | Styling, responsiveness, themes |
 
--   Reutilizar dependências instaladas quando adequadas.
--   Evitar bibliotecas redundantes.
--   Isolar Aladin Lite e Plotly em componentes próprios.
--   Verificar compatibilidade de versões antes de instalar ou atualizar
-    pacotes.
--   Não adicionar gerenciamento global de estado sem necessidade
-    demonstrada.
+### 3.1 Dependency guidelines
 
-------------------------------------------------------------------------
+- Reuse installed dependencies when suitable.
+- Avoid redundant libraries.
+- Isolate Aladin Lite and Plotly in dedicated components.
+- Check version compatibility before installing/upgrading packages.
+- Add global state management only for a demonstrated need.
 
-## 4. Arquitetura e organização do frontend
+---
 
-Organizar o frontend por responsabilidade, evitando componentes
-excessivamente grandes e dependências desnecessárias entre páginas.
+## 4. Frontend architecture and organization
 
-### 4.1 Estrutura recomendada
+Organize by responsibility; avoid oversized components and unnecessary page dependencies.
+
+### 4.1 Recommended structure
 
 ``` text
 frontend/
@@ -204,113 +184,106 @@ frontend/
 └── vite.config.ts
 ```
 
-A estrutura é uma referência, não uma obrigação de criar arquivos
-vazios. Criar módulos quando houver uma responsabilidade real.
+This structure is a reference, not a requirement to create empty files. Create modules only when they have a real responsibility.
 
-### 4.2 Responsabilidades dos diretórios
+### 4.2 Directory responsibilities
 
--   `pages/`: composição das páginas.
--   `components/common/`: controles e estados reutilizáveis.
--   `components/layout/`: cabeçalho, rodapé e estrutura compartilhada.
--   `components/home/`: componentes da página inicial.
--   `components/explore/`: campos e controles de consulta.
--   `components/viewer/`: visualizador, timeline, bandas e gráficos.
--   `services/`: comunicação HTTP.
--   `hooks/`: lógica React reutilizável.
--   `types/`: interfaces e tipos compartilhados.
--   `utils/`: conversão, validação e formatação.
--   `styles/`: tokens, temas e estilos globais.
+- `pages/`: page composition.
+- `components/common/`: reusable controls and states.
+- `components/layout/`: header, footer, shared structure.
+- `components/home/`: home-page components.
+- `components/explore/`: query fields and controls.
+- `components/viewer/`: viewer, timeline, bands, charts.
+- `services/`: HTTP communication.
+- `hooks/`: reusable React logic.
+- `types/`: shared interfaces and types.
+- `utils/`: conversion, validation, formatting.
+- `styles/`: tokens, themes, global styles.
 
-### 4.3 Regras de implementação
+### 4.3 Implementation rules
 
-1.  Cada componente deve ter responsabilidade clara.
-2.  Não concentrar uma página inteira em um único arquivo.
-3.  Não duplicar estilos ou regras de validação.
-4.  Manter chamadas ao backend fora dos componentes visuais.
-5.  Tipar propriedades, estados e respostas da API.
-6.  Evitar `any`; preferir tipos explícitos ou `unknown` com validação.
-7.  Evitar abstrações genéricas sem necessidade concreta.
-8.  Manter nomes de arquivos e componentes consistentes.
-9.  Não alterar arquivos fora de `frontend/` sem necessidade e
-    autorização.
-10. Preservar funcionalidades existentes após inspecionar sua
-    finalidade.
+1. Give each component a clear responsibility.
+2. Do not put an entire page in one file.
+3. Do not duplicate styling or validation rules.
+4. Keep backend calls outside visual components.
+5. Type props, state, API responses.
+6. Avoid `any`; prefer explicit types or validated `unknown`.
+7. Avoid generic abstractions without a concrete need.
+8. Keep component/file naming consistent.
+9. Do not change files outside `frontend/` without need and authorization.
+10. Inspect existing features and preserve their purpose.
 
-------------------------------------------------------------------------
+---
 
-## 5. Navegação e rotas
+## 5. Navigation and routes
 
-  Página          Rota         Finalidade
-  --------------- ------------ -----------------------------
-  Home            `/`          Apresentação do projeto
-  ExploreTheSky   `/explore`   Entrada dos parâmetros
-  SeeTheSky       `/viewer`    Visualização dos resultados
+| Page | Route | Purpose |
+|---|---|---|
+| Home | `/` | Project introduction |
+| ExploreTheSky | `/explore` | Parameter input |
+| SeeTheSky | `/viewer` | Result visualization |
 
-### 5.1 Fluxo principal
+### 5.1 Main flow
 
-``` text
+```text
 Home
   → ExploreTheSky
-  → envio dos parâmetros ao backend
-  → resposta do backend
+  → submit parameters to backend
+  → backend response
   → SeeTheSky
-  → ExploreTheSky (nova consulta)
+  → ExploreTheSky (new query)
 ```
 
-### 5.2 Regras de navegação
+### 5.2 Navigation rules
 
--   Páginas internas devem apresentar controle de retorno.
--   Preservar os parâmetros da consulta ao abrir o visualizador.
--   "Explorar novamente" retorna a `/explore`.
--   Acesso direto a `/viewer` sem consulta deve ser tratado:
-    redirecionar para `/explore` ou exibir orientação.
--   Utilizar navegação interna, sem recarregar a página inteira.
+- Internal pages provide a back control.
+- Preserve query parameters when opening the viewer.
+- “Explore again” returns to `/explore`.
+- Handle direct `/viewer` access without a query: redirect to `/explore` or display guidance.
+- Use internal navigation without full-page reloads.
 
-------------------------------------------------------------------------
+---
 
-## 6. Sistema visual
+## 6. Visual system
 
-A interface deve ter identidade científica, moderna, consistente e
-acessível.
+The interface should be scientific, modern, consistent, accessible.
 
-### 6.1 Tipografia
+### 6.1 Typography
 
-  Uso                               Fonte
-  --------------------------------- ------------
-  Títulos e cabeçalhos              Montserrat
-  Textos, formulários e controles   Manrope
+| Use | Font |
+|---|---|
+| Titles and headings | Montserrat |
+| Body, forms, controls | Manrope |
 
-Evitar adicionar outras famílias tipográficas sem necessidade.
+Avoid adding other font families without a need.
 
-### 6.2 Paleta --- tema claro
+### 6.2 Initial light-theme palette
 
-  Elemento             Cor             Código
-  -------------------- --------------- -----------
-  Texto principal      Grey11          `#1C1C1C`
-  Fundo geral          Azure2          `#E0EEEE`
-  Cartões              WhiteSmoke      `#F5F5F5`
-  Botões               Maroon          `#B03060`
-  Cabeçalho e rodapé   LightSkyBlue    `#87CEFA`
-  Destaques            DarkSlateBlue   `#483D8B`
+| Element | Color | Code |
+|---|---|---|
+| Primary text | Grey11 | `#1C1C1C` |
+| Page background | Azure2 | `#E0EEEE` |
+| Cards | WhiteSmoke | `#F5F5F5` |
+| Buttons | Maroon | `#B03060` |
+| Header/footer | LightSkyBlue | `#87CEFA` |
+| Highlights | DarkSlateBlue | `#483D8B` |
 
-### 6.3 Paleta --- tema escuro
+### 6.3 Initial dark-theme palette
 
-  Elemento             Cor             Código
-  -------------------- --------------- -----------
-  Texto principal      GhostWhite      `#F8F8FF`
-  Fundo geral          Grey11          `#1C1C1C`
-  Cartões              Azul profundo   `#24364D`
-  Botões               MediumOrchid    `#BA55D3`
-  Cabeçalho e rodapé   MidnightBlue    `#191970`
-  Destaques            Tan1            `#FFA54F`
+| Element | Color | Code |
+|---|---|---|
+| Primary text | GhostWhite | `#F8F8FF` |
+| Page background | Grey11 | `#1C1C1C` |
+| Cards | Deep blue | `#24364D` |
+| Buttons | MediumOrchid | `#BA55D3` |
+| Header/footer | MidnightBlue | `#191970` |
+| Highlights | Tan1 | `#FFA54F` |
 
-As cores são referências iniciais. Ajustes podem ser feitos para
-melhorar contraste e legibilidade sem descaracterizar a identidade.
+These are initial references. Adjustments may improve contrast and legibility without changing the identity.
 
-### 6.4 Tokens de design
+### 6.4 Design tokens
 
-Centralizar cores e propriedades visuais em variáveis CSS. Não espalhar
-valores hexadecimais diretamente pelos componentes.
+Centralize colors and visual properties in CSS variables. Do not scatter hexadecimal values across components.
 
 ``` css
 :root {
@@ -330,515 +303,447 @@ valores hexadecimais diretamente pelos componentes.
 }
 ```
 
-Os nomes dos tokens devem representar sua função, permitindo alterar a
-paleta sem modificar cada componente.
+Token names represent roles, allowing palette changes without modifying every component.
 
-### 6.5 Tema claro e escuro
+### 6.5 Light and dark themes
 
--   Botão minimalista com ícone de sol ou lua.
--   A alternância deve atualizar todas as páginas e componentes.
--   Cartões, textos, bordas, campos, menus e gráficos devem acompanhar o
-    tema.
--   Utilizar transições discretas.
--   Definir um tema inicial coerente; persistir a preferência somente se
-    isso fizer sentido para a implementação.
--   Garantir contraste adequado nos dois temas.
+- Minimal sun/moon icon button.
+- Switching updates every page and component.
+- Cards, text, borders, fields, menus, charts follow the theme.
+- Use subtle transitions.
+- Choose a coherent initial theme; persist preference only if appropriate.
+- Ensure adequate contrast in both themes.
 
-### 6.6 Animações
+### 6.6 Animations
 
-Utilizar com moderação:
+Use sparingly:
 
--   Fade-in e deslocamento vertical sutil nos cartões da Home.
--   Transições suaves de tema.
--   Feedback visual em hover, focus e active.
--   Transições discretas em menus e painéis.
+- Fade-in and subtle vertical movement on home cards.
+- Smooth theme transitions.
+- Hover/focus/active feedback.
+- Subtle menu/panel transitions.
 
-Respeitar `prefers-reduced-motion`, reduzindo ou removendo animações
-quando solicitado pelo sistema operacional.
+Respect `prefers-reduced-motion`, reducing/removing animation when requested by the operating system.
 
-------------------------------------------------------------------------
+---
 
-## 7. Especificação das páginas
+## 7. Page specifications
 
 ## 7.1 Home (`/`)
 
 ### Hero
 
-Apresentar:
+Include:
 
--   Título: **Sky Explorer**.
--   Texto introdutório sobre o SPHEREx e o propósito da aplicação.
--   Botão **Começar exploração**, direcionando a `/explore`.
--   Alternância de tema no canto superior direito.
--   Imagem de fundo dinâmica.
+- Title: **Sky Explorer**.
+- Introductory SPHEREx/application-purpose text.
+- **Start exploring** button linking to `/explore`.
+- Theme switch in the upper-right corner.
+- Dynamic background image.
 
-**Tema claro:** céu azulado, nuvens e incidência de luz solar.\
-**Tema escuro:** universo, estrelas, galáxias e planetas.
+**Light theme:** blue sky, clouds, sunlight.
+**Dark theme:** universe, stars, galaxies, planets.
 
-O fundo deve manter o texto legível, utilizando sobreposição ou
-gradiente quando necessário. A animação não pode prejudicar leitura,
-performance ou navegação.
+Keep text legible through an overlay or gradient when necessary. Animation must not impair reading, performance, or navigation.
 
-### Seções informativas
+### Information sections
 
-Criar três cartões ou blocos visuais:
+Create three cards or visual blocks:
 
-1.  **O que é o SPHEREx?** --- missão, história, objetivos e tecnologia.
-2.  **Sky Explorer --- NASA Space Apps Challenge** --- desafio,
-    propósito e funcionamento da ferramenta.
-3.  **Quem somos nós** --- equipe e integrantes.
+1. **What is SPHEREx?** Mission, history, goals, technology.
+2. **Sky Explorer — NASA Space Apps Challenge:** challenge, purpose, how the tool works.
+3. **Who we are:** team and members.
 
-O conteúdo definitivo será fornecido posteriormente. Usar textos
-provisórios claramente identificados. Os cartões devem aparecer com
-animação discreta ao entrar na área visível da tela.
+Final copy will be supplied later. Mark provisional text clearly. Cards should appear with subtle animation when entering the viewport.
 
-### Rodapé
+### Footer
 
-Incluir identificação do projeto, créditos, links relevantes e
-referências institucionais quando fornecidas. Manter consistência com o
-tema ativo.
+Include project identification, credits, relevant links, and institutional references when supplied. Match the active theme.
 
-------------------------------------------------------------------------
+---
 
 ## 7.2 ExploreTheSky (`/explore`)
 
-### Objetivo e estrutura
+### Goal and structure
 
-Permitir que o usuário informe uma posição celeste e parâmetros de
-observação.
+Let users enter a sky position and observation parameters.
 
-A página deve conter cabeçalho com retorno, título **Explore o
-Universo**, formulário centralizado, campos agrupados, botão principal e
-mensagens de validação próximas aos campos.
+Include a header with back control, title **Explore the Universe**, a centered form, grouped fields, primary action, and validation messages near their fields.
 
-### Coordenadas celestes
+### Celestial coordinates
 
-**Ascensão reta (RA)**
+**Right ascension (RA)**
 
--   Entrada em horas, minutos e segundos.
--   Campos separados para hora, minuto e segundo.
--   Hora no intervalo de 0 a menos de 24.
--   Minutos e segundos no intervalo de 0 a menos de 60.
--   Converter para graus decimais antes do envio, se esse for o formato
-    acordado com o backend.
+- Hours, minutes, seconds input.
+- Separate fields for each unit.
+- Hours from 0 to less than 24.
+- Minutes/seconds from 0 to less than 60.
+- Convert to decimal degrees before submission if that is the agreed backend format.
 
-\[
-RA\_{graus}=15`\left`{=tex}(h+`\frac{m}{60}`{=tex}+`\frac{s}{3600}`{=tex}`\right`{=tex})
-\]
+```text
+RA_degrees = 15 × (h + m/60 + s/3600)
+```
 
-**Declinação (Dec)**
+**Declination (Dec)**
 
--   Entrada em graus.
--   Aceitar valores positivos e negativos.
--   Permitir graus decimais.
--   Validar entre `-90°` e `+90°`.
+- Degree input.
+- Accept positive and negative values.
+- Allow decimal degrees.
+- Validate between `-90°` and `+90°`.
 
-**Referência celeste:** o ponto vernal/equinócio vernal é a origem da
-ascensão reta; não deve ser um terceiro campo de entrada.
+**Celestial reference:** the vernal point/equinox is the origin of right ascension, not a third input field.
 
-### Seleção de data
+### Date selection
 
-Oferecer duas opções:
+Offer two choices:
 
--   Utilizar a observação mais recente disponível.
--   Informar uma data específica.
+- Use the latest available observation.
+- Enter a specific date.
 
-Quando habilitada:
+When enabled:
 
--   Exibir date picker.
--   Mostrar data como `DD/MM/YYYY`.
--   Validar datas reais do calendário.
--   Enviar como `YYYY-MM-DD`.
+- Display a date picker.
+- Show `DD/MM/YYYY`.
+- Validate actual calendar dates.
+- Submit `YYYY-MM-DD`.
 
-Não presumir que toda data escolhida possui observação; isso depende da
-resposta do backend.
+Do not assume every chosen date has an observation; that depends on the backend response.
 
-### Seleção espectral
+### Spectral selection
 
--   Menu suspenso com as bandas disponíveis.
--   Opção inicial `P` (padrão).
--   Demais opções em ordem alfabética.
--   Lista alimentada por valores definidos pelo projeto ou fornecidos
-    pelo backend.
--   Não inventar nomes de bandas.
--   Menu acessível por teclado e adequado a dispositivos móveis.
+- Dropdown of available bands.
+- Initial option `P` (default).
+- Remaining options alphabetically.
+- Populate from project-defined or backend-provided values.
+- Never invent band names.
+- Ensure keyboard/mobile accessibility.
 
-### Envio
+### Submission
 
-Botão: **Visualizar →**.
+Button: **View →**.
 
-Ao clicar:
+On click:
 
-1.  Validar os campos.
-2.  Bloquear o envio se houver dados inválidos.
-3.  Preparar parâmetros no formato esperado pela API.
-4.  Exibir carregamento.
-5.  Enviar a consulta.
-6.  Em caso de sucesso, abrir `/viewer` preservando os dados.
-7.  Em caso de falha, manter o usuário no formulário e apresentar
-    mensagem clara.
+1. Validate fields.
+2. Block invalid submissions.
+3. Prepare API-compatible parameters.
+4. Show loading state.
+5. Submit the query.
+6. On success, open `/viewer` preserving the query.
+7. On failure, keep the user on the form and show a clear message.
 
-Não simular sucesso de uma consulta real quando o backend não estiver
-conectado.
+Do not simulate successful live queries when the backend is disconnected.
 
-------------------------------------------------------------------------
+---
 
 ## 7.3 SeeTheSky (`/viewer`)
 
-### Objetivo
+### Goal
 
-Apresentar imagens retornadas pelo backend e permitir explorar
-observações, bandas espectrais, informações temporais e gráficos.
+Display backend images and explore observations, spectral bands, temporal information, charts.
 
-Título: **SPHEREx Image**.
+Title: **SPHEREx Image**.
 
-### Layout principal
+### Main layout
 
--   **Esquerda:** seleção de bandas.
--   **Centro:** visualizador astronômico.
--   **Direita:** alternância entre imagem e gráfico.
--   **Cabeçalho:** título, retorno e controles contextuais.
--   **Área temporal:** navegação entre observações.
+- **Left:** band selection.
+- **Center:** astronomical viewer.
+- **Right:** image/chart toggle.
+- **Header:** title, back control, contextual controls.
+- **Temporal area:** observation navigation.
 
-Em telas menores, reorganizar ou recolher painéis laterais sem impedir o
-acesso aos controles.
+On smaller screens, reorganize/collapse side panels while retaining access to controls.
 
 ### Aladin Lite
 
-O componente `AladinViewer` encapsula a biblioteca e deverá:
+`AladinViewer` encapsulates the library and should:
 
--   Exibir a imagem ou camada astronômica recebida.
--   Permitir navegação pelo campo celeste.
--   Aplicar zoom.
--   Permitir pan/arraste.
--   Responder ao scroll quando suportado.
--   Atualizar a visualização conforme a observação selecionada.
+- Display the received astronomical image/layer.
+- Support field navigation, zoom, pan/drag.
+- Respond to scrolling when supported.
+- Update according to the selected observation.
 
-**Diretrizes técnicas:**
+**Technical guidelines:**
 
--   Manter a integração isolada.
--   Não recriar a instância a cada renderização React.
--   Gerenciar inicialização e limpeza corretamente.
--   Evitar conflitos entre controles personalizados e controles nativos.
--   Utilizar Aladin para visualização, não para processamento
-    científico.
+- Isolate integration.
+- Do not recreate the instance on every React render.
+- Manage initialization and cleanup correctly.
+- Avoid conflicts between custom/native controls.
+- Use Aladin for display, not scientific processing.
 
-### Zoom e panorâmica
+### Zoom and pan
 
-Disponibilizar controle visual agrupado (`+ | -`). Preferir os
-comportamentos nativos do Aladin. O cursor poderá indicar `grab` e
-`grabbing` quando compatível com a interação real.
+Provide grouped `+ | -` controls. Prefer native Aladin behavior. Cursor `grab`/`grabbing` may be used when matching actual interaction.
 
-### Bandas espectrais
+### Spectral bands
 
-O painel esquerdo deverá:
+The left panel should:
 
--   Exibir as bandas disponíveis.
--   Selecionar todas por padrão quando esse for o comportamento definido
-    para a consulta.
--   Permitir selecionar/desmarcar individualmente.
--   Indicar claramente as bandas ativas.
--   Atualizar a visualização conforme a seleção.
--   Informar quando nenhuma banda estiver selecionada.
+- Display available bands.
+- Select all initially when the query defines that behavior.
+- Allow individual selection/deselection.
+- Clearly identify active bands.
+- Update display when selection changes.
+- Indicate when no bands are selected.
 
-A combinação das bandas será fornecida ou processada pelo backend. O
-frontend envia a seleção e apresenta o resultado. Não presumir que a
-soma direta de imagens de bandas diferentes equivale cientificamente a
-uma imagem convencional.
+Band combination is supplied/processed by the backend. The frontend sends selection and presents results. Do not assume directly summing different-band images is scientifically equivalent to a conventional image.
 
-### Alternância imagem/gráfico
+### Image/chart toggle
 
-No lado direito, disponibilizar controle para alternar entre:
+Provide a right-side control switching:
 
--   **Imagem:** Aladin.
--   **Gráfico:** Plotly.
+- **Image:** Aladin.
+- **Chart:** Plotly.
 
-O controle deverá ocupar a mesma região nos dois modos. A mudança não
-deve apagar a seleção temporal ou espectral.
+Use the same region for both modes. Switching must preserve temporal/spectral selection.
 
-### Gráficos com Plotly
+### Plotly charts
 
-O componente `SpectralChart` deverá:
+`SpectralChart` should:
 
--   Isolar a biblioteca Plotly.
--   Renderizar os dados disponibilizados pelo backend.
--   Permitir selecionar o tipo de informação representada, conforme os
-    dados disponíveis.
--   Redimensionar conforme o espaço disponível.
--   Exibir carregamento, ausência de dados e erro.
--   Atualizar quando os parâmetros relevantes mudarem.
+- Isolate Plotly.
+- Render backend-provided data.
+- Allow choosing the information type according to available data.
+- Resize to available space.
+- Show loading, empty, error states.
+- Update when relevant parameters change.
 
-Não inventar eixos, unidades, séries ou valores científicos. A definição
-dos gráficos depende do contrato do backend.
+Do not invent axes, units, series, or scientific values. Chart definitions depend on the backend contract.
 
-### Linha temporal
+### Timeline
 
-A navegação temporal é uma funcionalidade central.
+Temporal navigation is central. `TimelinePlayer` traverses observations from newest to oldest.
 
-O componente `TimelinePlayer` deverá percorrer observações ordenadas da
-mais recente para a mais antiga.
+Controls:
 
-Controles:
+- Observation-selection slider.
+- Previous/next buttons.
+- Play/pause.
+- Active observation date/time.
+- Sequence position when useful.
 
--   Slider para selecionar observação.
--   Botões anterior e próxima.
--   Reproduzir/pausar.
--   Data e horário da observação ativa.
--   Posição atual na sequência, quando útil.
+**Behavior:**
 
-**Comportamento:**
+1. Initially choose the latest observation unless a requested date matches another.
+2. Slider changes update the active observation.
+3. Update the image with the active observation.
+4. Update metadata together with it.
+5. Advance automatically during playback.
+6. At the end, pause or restart according to the product decision.
 
-1.  Selecionar inicialmente a observação mais recente, exceto quando uma
-    data solicitada resultar em observação correspondente.
-2.  Atualizar a observação ativa ao mover o slider.
-3.  Atualizar a imagem conforme a observação ativa.
-4.  Atualizar metadados junto com a observação.
-5.  Avançar automaticamente durante a reprodução.
-6.  Definir comportamento previsível ao chegar ao fim da sequência:
-    pausar ou reiniciar conforme decisão de produto.
+Decouple timeline and viewer. The timeline controls the active observation's index/ID; the viewer receives that observation.
 
-A timeline deve ser desacoplada do visualizador. Ela controla o índice
-ou identificador da observação ativa; o visualizador recebe a observação
-correspondente.
+### Metadata
 
-### Metadados
+Below the main area, show available:
 
-Abaixo da área principal, exibir, quando disponíveis:
+- RA, Dec.
+- Observation date/time.
+- Selected bands.
+- Observation ID.
+- Other relevant backend metadata.
 
--   RA.
--   Dec.
--   Data da observação.
--   Horário da observação.
--   Bandas selecionadas.
--   Identificador da observação.
--   Outros metadados relevantes retornados pelo backend.
+Use clear labels/units. Never display fictional values as real data.
 
-Apresentar rótulos e unidades claros. Não exibir valores fictícios como
-dados reais.
+### Explore again
 
-### Explorar novamente
+At the bottom, provide **Explore again →**, linking to `/explore`.
 
-Ao final da página, apresentar **Explorar novamente →**, direcionando
-para `/explore`.
+---
 
-------------------------------------------------------------------------
+## 8. Backend integration
 
-## 8. Integração com o backend
+Centralize communication in `services/api.ts`.
 
-A comunicação deverá ser centralizada em `services/api.ts`.
+### 8.1 Principles
 
-### 8.1 Princípios
+- Do not scatter `fetch` calls across components.
+- Do not invent endpoints/response formats.
+- Confirm the contract with the backend team.
+- Define TypeScript types matching actual data.
+- Handle HTTP errors, invalid responses, missing data.
+- Separate query, observation, image, and metadata models.
 
--   Não espalhar chamadas `fetch` pelos componentes.
--   Não inventar endpoints nem formatos de resposta.
--   Confirmar o contrato da API com a equipe do backend.
--   Criar tipos TypeScript correspondentes aos dados reais.
--   Tratar erros HTTP, respostas inválidas e ausência de dados.
--   Separar dados da consulta, observações, imagens e metadados.
+### 8.2 Conceptual input
 
-### 8.2 Dados de entrada conceituais
+A query may require:
 
-A consulta poderá exigir:
+- RA in decimal degrees.
+- Dec in decimal degrees.
+- A specific date or latest-observation indication.
+- One band or a set of bands.
 
--   RA em graus decimais.
--   Dec em graus decimais.
--   Data específica ou indicação de observação mais recente.
--   Uma banda ou conjunto de bandas.
+Final format must follow the agreed backend contract.
 
-O formato definitivo deve seguir o contrato acordado com o backend.
+### 8.3 Conceptual output
 
-### 8.3 Dados de saída conceituais
+A response may contain:
 
-A resposta poderá conter:
+- Query ID.
+- Queried coordinates.
+- Observation list.
+- Dates/times.
+- Image identifiers/references.
+- Available bands.
+- Metadata.
+- Chart data.
 
--   Identificação da consulta.
--   Coordenadas consultadas.
--   Lista de observações.
--   Datas e horários.
--   Identificadores ou referências das imagens.
--   Bandas disponíveis.
--   Metadados.
--   Dados necessários aos gráficos.
+This is a conceptual proposal, not a final contract. Confirm names, types, required fields, and formats before integration.
 
-Esta é uma proposta conceitual, não um contrato definitivo. Confirmar
-nomes, tipos, obrigatoriedade e formatos antes da integração.
+### 8.4 Asynchronous states
 
-### 8.4 Estados assíncronos
+| State | Behavior |
+|---|---|
+| Idle | Interface ready |
+| Loading | Loading indicator; appropriate controls disabled |
+| Success | Display received data |
+| Empty | Explain that no observations were found |
+| Error | Clear message and retry option |
 
-  -----------------------------------------------------------------------
-  Estado                              Comportamento
-  ----------------------------------- -----------------------------------
-  Idle                                Interface pronta
+Do not leave unexplained blank areas while loading or when no results exist.
 
-  Loading                             Indicador de carregamento e
-                                      controles adequadamente
-                                      desabilitados
+---
 
-  Success                             Apresentar os dados recebidos
+## 9. Responsiveness and accessibility
 
-  Empty                               Informar que não foram encontradas
-                                      observações
+### 9.1 Responsiveness
 
-  Error                               Exibir mensagem clara e opção de
-                                      tentar novamente
-  -----------------------------------------------------------------------
+Support desktop, laptop, tablet, smartphone.
 
-Não deixar áreas vazias sem explicação durante carregamentos ou quando
-não houver resultados.
+- Avoid fixed widths causing overflow.
+- Reorganize side panels on small screens.
+- Preserve form/metadata legibility.
+- Give the viewer adequate working space.
+- Adapt timeline controls to touch.
+- Avoid menus permanently covering the view.
 
-------------------------------------------------------------------------
+### 9.2 Accessibility
 
-## 9. Responsividade e acessibilidade
+- Semantic HTML.
+- Field-associated labels.
+- Keyboard navigation.
+- Visible focus.
+- Do not convey selection/errors through color alone.
+- Adequate contrast.
+- Accessible icon/control names.
+- Respect `prefers-reduced-motion`.
 
-### 9.1 Responsividade
+---
 
-A aplicação deve funcionar em desktop, notebook, tablet e smartphone.
+## 10. Performance and stability
 
--   Evitar larguras fixas que causem overflow.
--   Reorganizar painéis laterais em telas pequenas.
--   Preservar legibilidade de formulários e metadados.
--   Garantir área útil adequada para o visualizador.
--   Adaptar controles da timeline ao toque.
--   Evitar menus que cubram permanentemente a visualização.
+- Avoid unnecessary renders.
+- Do not recreate Aladin/Plotly instances unnecessarily.
+- Load heavy resources only when needed.
+- Optimize images/fonts.
+- Clean up listeners, instances, resources on unmount.
+- Handle image-loading failures.
+- Avoid large astronomical files in React state.
+- Separate UI state from scientific data.
+- Do not block navigation for operations that can safely run in the background.
 
-### 9.2 Acessibilidade
+---
 
--   Utilizar HTML semântico.
--   Associar rótulos aos campos.
--   Permitir navegação por teclado.
--   Exibir foco visível.
--   Não depender apenas de cores para indicar seleção ou erro.
--   Garantir contraste adequado.
--   Fornecer nomes acessíveis a ícones e controles.
--   Respeitar `prefers-reduced-motion`.
+## 11. Implementation plan
+
+### Stage 1 — Foundation
 
-------------------------------------------------------------------------
+- Inspect existing structure.
+- Confirm dependencies/scripts.
+- Configure routes.
+- Define folders.
+- Implement design tokens/themes.
+- Create header, footer, common components.
 
-## 10. Desempenho e estabilidade
+**Completion:** the application starts, navigates, and switches themes consistently.
 
--   Evitar renderizações desnecessárias.
--   Não recriar instâncias Aladin ou Plotly sem necessidade.
--   Carregar recursos pesados somente quando necessários.
--   Otimizar imagens e fontes.
--   Limpar listeners, instâncias e recursos ao desmontar componentes.
--   Tratar falhas de carregamento de imagens.
--   Evitar armazenar grandes arquivos astronômicos no estado React.
--   Separar estado da interface dos dados científicos.
--   Não bloquear a navegação durante operações que possam ocorrer em
-    segundo plano com segurança.
+### Stage 2 — Home
 
-------------------------------------------------------------------------
+- Implement hero and theme-dependent background.
+- Add call to action.
+- Create information cards.
+- Implement subtle animations.
+- Create footer.
 
-## 11. Plano de implementação
+**Completion:** responsive, coherent page in both themes.
 
-### Etapa 1 --- Fundação
+### Stage 3 — ExploreTheSky
 
--   Inspecionar a estrutura existente.
--   Confirmar dependências e scripts.
--   Configurar rotas.
--   Definir estrutura de pastas.
--   Implementar tokens de design e temas.
--   Criar cabeçalho, rodapé e componentes comuns.
+- Implement form.
+- Create RA/Dec fields.
+- Implement RA validation/conversion.
+- Create date/band selectors.
+- Implement submission/error states.
 
-**Conclusão:** aplicação inicia, navega entre rotas e alterna temas sem
-inconsistências.
-
-### Etapa 2 --- Home
-
--   Implementar hero e fundo por tema.
--   Adicionar chamada para ação.
--   Criar cartões informativos.
--   Implementar animações discretas.
--   Criar rodapé.
-
-**Conclusão:** página responsiva e coerente nos dois temas.
-
-### Etapa 3 --- ExploreTheSky
-
--   Implementar formulário.
--   Criar campos RA e Dec.
--   Implementar validação e conversão de RA.
--   Criar seletor de data e bandas.
--   Implementar estados de envio e erro.
-
-**Conclusão:** formulário produz parâmetros tipados e validados, mesmo
-antes da integração real.
-
-### Etapa 4 --- SeeTheSky: estrutura
-
--   Criar layout e painéis.
--   Criar placeholder do Aladin e do Plotly.
--   Criar seletor de bandas e timeline.
--   Criar metadados.
--   Implementar alternância imagem/gráfico.
-
-**Conclusão:** fluxo visual funciona com dados simulados claramente
-identificados.
-
-### Etapa 5 --- Integração
-
--   Confirmar contrato da API.
--   Implementar serviços HTTP.
--   Conectar formulário ao backend.
--   Mapear respostas para tipos frontend.
--   Integrar Aladin Lite e Plotly.
--   Sincronizar timeline, imagem e metadados.
--   Tratar erros e ausência de dados.
-
-**Conclusão:** uma consulta real percorre o fluxo completo.
-
-### Etapa 6 --- Revisão
-
--   Testar navegação.
--   Testar validação de coordenadas e datas.
--   Testar os dois temas.
--   Testar responsividade.
--   Verificar console e build.
--   Revisar acessibilidade e desempenho.
-
-------------------------------------------------------------------------
-
-## 12. Critérios de aceitação
-
--   [ ] As três páginas estão implementadas.
--   [ ] As rotas funcionam corretamente.
--   [ ] Cabeçalho e rodapé são reutilizados quando apropriado.
--   [ ] Tema claro e escuro funcionam em toda a aplicação.
--   [ ] Cores e fontes estão centralizadas.
--   [ ] O formulário valida coordenadas e datas.
--   [ ] A conversão de RA está implementada e testável.
--   [ ] Estados de carregamento, erro e ausência de dados estão
-    previstos.
--   [ ] A página de visualização possui estrutura para Aladin e Plotly.
--   [ ] A timeline controla a observação ativa.
--   [ ] A seleção de bandas funciona na interface.
--   [ ] Os metadados acompanham a observação selecionada.
--   [ ] O layout funciona em desktop e dispositivos móveis.
--   [ ] Dados fictícios não são apresentados como científicos.
--   [ ] O projeto compila sem erros de TypeScript.
--   [ ] O build de produção é concluído com sucesso.
-
-------------------------------------------------------------------------
-
-## 13. Diretrizes para Cursor e agentes de programação
-
-1.  Ler esta documentação antes de alterar o código.
-2.  Inspecionar a estrutura existente e identificar o que já funciona.
-3.  Trabalhar somente em `frontend/`, salvo autorização explícita.
-4.  Implementar uma etapa por vez.
-5.  Antes de alterações relevantes, apresentar um plano curto.
-6.  Preservar funcionalidades existentes.
-7.  Não inventar endpoints, respostas, bandas ou valores científicos.
-8.  Não instalar dependências sem justificar a necessidade.
-9.  Não criar arquivos ou abstrações apenas para preencher a estrutura
-    sugerida.
-10. Executar verificações de TypeScript e build após mudanças
-    relevantes.
-11. Informar arquivos criados ou modificados.
-12. Registrar pendências que dependam do backend ou de decisões da
-    equipe.
-
-**Prioridade final:** entregar uma interface clara, consistente,
-funcional e fácil de expandir. A arquitetura deve facilitar o
-desenvolvimento, não torná-lo mais lento ou complexo do que o projeto
-exige.
+**Completion:** form produces typed, validated parameters even before live integration.
+
+### Stage 4 — SeeTheSky structure
+
+- Create layout/panels.
+- Create Aladin/Plotly placeholders.
+- Create band selector/timeline.
+- Create metadata display.
+- Implement image/chart switching.
+
+**Completion:** visual flow works with clearly identified simulated data.
+
+### Stage 5 — Integration
+
+- Confirm API contract.
+- Implement HTTP services.
+- Connect form/backend.
+- Map responses to frontend types.
+- Integrate Aladin Lite/Plotly.
+- Synchronize timeline, image, metadata.
+- Handle errors/empty data.
+
+**Completion:** a live query follows the complete flow.
+
+### Stage 6 — Review
+
+- Test navigation.
+- Test coordinate/date validation.
+- Test both themes.
+- Test responsiveness.
+- Check console/build.
+- Review accessibility/performance.
+
+---
+
+## 12. Acceptance criteria
+
+- [ ] All three pages implemented.
+- [ ] Routes work correctly.
+- [ ] Header/footer reused where appropriate.
+- [ ] Light/dark themes work throughout the application.
+- [ ] Colors/fonts centralized.
+- [ ] Form validates coordinates/dates.
+- [ ] RA conversion implemented and testable.
+- [ ] Loading/error/empty states covered.
+- [ ] Viewer structure supports Aladin/Plotly.
+- [ ] Timeline controls active observation.
+- [ ] Band selection works.
+- [ ] Metadata follows selection.
+- [ ] Layout works on desktop/mobile.
+- [ ] Fictional data not presented as scientific data.
+- [ ] TypeScript compiles without errors.
+- [ ] Production build succeeds.
+
+---
+
+## 13. Guidelines for Cursor and coding agents
+
+1. Read this documentation before code changes.
+2. Inspect the existing structure and identify working behavior.
+3. Work only in `frontend/` unless explicitly authorized otherwise.
+4. Implement one stage at a time.
+5. Present a short plan before significant changes.
+6. Preserve existing features.
+7. Never invent endpoints, responses, bands, scientific values.
+8. Justify dependency installation.
+9. Do not create files/abstractions merely to fill the proposed structure.
+10. Run TypeScript/build checks after significant changes.
+11. Report created/modified files.
+12. Record pending items requiring backend/team decisions.
+
+**Final priority:** deliver a clear, consistent, functional, extensible interface. Architecture should help development, not make it slower or more complex than the project requires.

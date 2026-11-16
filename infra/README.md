@@ -1,49 +1,49 @@
-# SPHEREx na VPS Oracle
+# CosmoSPHERE on the Oracle VPS
 
-Esta stack tem quatro serviços: `frontend` e `api` (Node, publicados pelo Traefik), `python` (FastAPI, sem publicação) e `lab` (laboratório de mapeamento em `dev/temporal-lab`, publicado em `lab.spherex…` com senha). Usa a rede externa `web` e o Traefik já existente; `api` e `python` também compartilham a rede privada `spherex_internal`, pela qual a API chama `http://spherex-python:8000`. Não publica portas adicionais no host e não recria outros projetos. O Compose é exclusivo deste projeto; não execute `docker compose down` no diretório das outras aplicações.
+This stack has four services: `frontend` and `api` (Node, published by Traefik), `python` (FastAPI, not published), and `lab` (mapping laboratory in `dev/temporal-lab`, published at `lab.spherex…` with authentication). It uses the external `web` network and existing Traefik instance. `api` and `python` also share the private `spherex_internal` network, through which the API calls `http://spherex-python:8000`. It exposes no additional host ports and does not recreate other projects. Compose belongs exclusively to this project; do not run `docker compose down` in another application's directory.
 
 ## Pipeline
 
-`.github/workflows/ci-cd.yml` valida PRs destinados à `main` e todo push na `main` em três jobs independentes:
+`.github/workflows/ci-cd.yml` validates PRs targeting `main` and pushes to `main` through independent project jobs:
 
-- **Backend:** instala as dependências Node, executa ESLint, TypeScript, testes da API e build.
-- **Python:** instala `backend/requirements-dev.txt` e executa os testes do núcleo científico e do FastAPI.
-- **Frontend:** instala as dependências Node, executa ESLint, TypeScript, testes do servidor e build Vite.
-- **Lab:** ESLint de `dev/`, testes do laboratório (Python e Node) e um smoke test que sobe o gateway com autenticação e o motor `v1`.
-- **Infra:** verifica a sintaxe dos scripts Bash e executa os testes Python de deploy.
+- **Backend:** installs Node dependencies, runs ESLint, TypeScript, API tests, build.
+- **Python:** installs `backend/requirements-dev.txt` and tests the scientific core/FastAPI.
+- **Frontend:** installs Node dependencies, runs ESLint, TypeScript, server tests, Vite build.
+- **Lab:** ESLint for `dev/`, Python/Node lab tests, smoke test starting an authenticated gateway and `v1` engine.
+- **Infra:** Bash syntax checks and Python deployment tests.
 
-Arquivos `backend/**/*.py` e `backend/requirements*.txt` pertencem ao serviço Python e também ao `lab` (que congela esse código em versões do motor); `dev/temporal-lab/**` pertence só ao `lab`; o restante de `backend/` pertence à API Node. Se arquivos de um serviço mudarem sem alterações em `infra/`, esse serviço é publicado quando seu próprio CI passar, independentemente dos demais. Alterações em `infra/` acionam um deploy da stack inteira e exigem sucesso de todos os CIs. A execução manual também valida e publica a stack inteira. PRs apenas validam; o merge gera o push que publica.
+`backend/**/*.py` and `backend/requirements*.txt` belong to Python and lab (which freezes that code into engine versions); `dev/temporal-lab/**` belongs only to lab; other `backend/` files belong to the Node API. If one service changes without `infra/` changes, it deploys when its own CI passes, independently of other services. `infra/` changes trigger a full-stack deployment requiring all checks. Manual dispatch also validates and publishes the full stack. PRs only validate; merging produces the push that publishes.
 
-Após o CI passar, o job de deploy usa uma chave SSH exclusiva do usuário `spherex-deploy`. A chave aceita somente `deploy <SHA de 40 caracteres> [api|frontend|python|lab|stack]`; não abre shell, SFTP, túnel ou encaminhamento de portas. O secret `SPHEREX_SSH_PRIVATE_KEY` já foi configurado no repositório. A chave local está em `~/.ssh/spherex_github_actions_ed25519`; não a versione. `ssh_known_hosts` contém somente as chaves públicas do servidor já confiadas por este Mac.
+After CI passes, deployment uses a dedicated `spherex-deploy` SSH key. It accepts only `deploy <40-character SHA> [api|frontend|python|lab|stack]`, with no shell, SFTP, tunnels, or port forwarding. Repository secret `SPHEREX_SSH_PRIVATE_KEY` is configured. The local key is `~/.ssh/spherex_github_actions_ed25519`; never commit it. `ssh_known_hosts` contains only server public keys previously trusted by this Mac.
 
-A VPS busca o repositório público por HTTPS e publica exatamente o commit aprovado. Um lock na VPS serializa deploys. Execuções de commits superados pela `main` são ignoradas para evitar regressão por ordem de conclusão do CI.
+The VPS fetches the public repository over HTTPS and publishes exactly the approved commit. A VPS lock serializes deployments. Runs superseded by `main` are skipped to avoid regressions caused by CI completion order.
 
-O build dos serviços Node roda em um container temporário `node:24-bookworm-slim` com limite de 1 GB e 1 CPU. O deploy de API compila somente o backend; o de frontend compila somente o frontend. Ambos instalam pelo lockfile e removem dependências de desenvolvimento. O build Python roda em `python:3.12-slim-bookworm` (2 GB, 1 CPU) e cria um venv em `/app/.venv` dentro da release com `backend/requirements.txt`. A release do `lab` reaproveita a release Python do mesmo commit quando ela existe (mesmo venv e mesmo caminho `/app`); senão faz o mesmo build. Um deploy de stack prepara os três. Os containers finais usam as mesmas imagens oficiais; não há imagem própria, registry ou servidor de desenvolvimento em produção. Todos rodam sem root, com filesystem e código somente leitura, limites de memória/CPU e logs rotacionados. O Python tem 2 GB/1 CPU e grava apenas em `/opt/docker/spherex/cache` (montado em `/cache`) e no `/tmp` em memória.
+Node builds run in temporary `node:24-bookworm-slim` containers limited to 1 GB/1 CPU. API deployment compiles only the backend; frontend deployment compiles only the frontend. Both install from the lockfile and remove development dependencies. Python builds use `python:3.12-slim-bookworm` (2 GB/1 CPU), creating a release venv at `/app/.venv` from `backend/requirements.txt`. Lab reuses the same commit's Python release when available (same venv and `/app` path), otherwise performs the same build. Full-stack deployment prepares all three release types. Runtime containers use these official images; no custom image, registry, or development server is used in production. Containers are non-root with read-only filesystems/code, CPU/memory limits, and rotated logs. Python has 2 GB/1 CPU and writes only to `/opt/docker/spherex/cache` (mounted at `/cache`) and memory-backed `/tmp`.
 
-As releases ficam em `/opt/docker/spherex/releases/<api|frontend|python|lab>/<SHA>`. Os links `/opt/docker/spherex/current-api`, `current-frontend`, `current-python` e `current-lab` são atualizados atomicamente; um deploy de serviço recria somente esse container, enquanto um deploy de stack recria todos. Cada serviço mantém sua própria versão, indicada por seu `/healthz`. Existe uma breve interrupção durante a recriação do serviço atualizado; este fluxo não oferece zero downtime.
+Releases live under `/opt/docker/spherex/releases/<api|frontend|python|lab>/<SHA>`. Links `/opt/docker/spherex/current-api`, `current-frontend`, `current-python`, and `current-lab` switch atomically. A service deployment recreates only its container; a stack deployment recreates all. Each service reports its own version through `/healthz`. Recreation causes a brief interruption; this is not a zero-downtime flow.
 
-O SHA vem do arquivo gerado `.release.env`, incluído em cada release. Se a subida ou o healthcheck falhar, o script restaura a release anterior do serviço; em deploy de stack, também restaura o Compose anterior. Um serviço sem release anterior (por exemplo, o primeiro deploy do Python) é removido no rollback. Se o build falhar, as versões em execução permanecem ativas. Para cada serviço, são mantidas as releases ativa e anterior, além das três outras mais recentes.
+The SHA comes from generated `.release.env`, included in each release. If startup or healthchecking fails, deployment restores that service's previous release; full-stack rollback also restores the previous Compose file. A service without a previous release, such as its first deployment, is removed during rollback. Build failure leaves existing services running. Each service retains the active and previous releases plus the three most recent additional releases.
 
-## Arquivos na VPS
+## VPS files
 
-- `/opt/docker/spherex/compose.yaml`: Compose ativo, enviado inicialmente por SCP e atualizado a partir de cada release.
-- `/opt/docker/spherex/.env`: caminhos independentes da API e do frontend, mais os domínios; veja `.env.example`.
-- `/opt/docker/spherex/api.env`: variáveis privadas da API; veja `api.env.example`. `PYTHON_API_URL` vem do `compose.yaml`, não deste arquivo. O arquivo pertence ao UID/GID 1000, com permissão 600, e é montado somente na API como somente leitura. O Node carrega esse arquivo diretamente, sem o Portainer precisar ler o caminho do host.
-- `/opt/docker/spherex/repository.git`: clone bare do repositório público.
-- `/opt/docker/spherex/api-current-sha`, `frontend-current-sha` e `python-current-sha`: últimas releases publicadas de cada serviço.
-- `/opt/docker/spherex/cache`: cache gravável do Python (UID 1000); pode ser apagado, tudo é regenerável.
-- `/opt/docker/spherex/lab`: acervo do laboratório (UID 1000): motores congelados, registros, caches por versão e `exports/` para o produto. **Não é regenerável sem horas de download do IRSA; não apague.** `CREDENTIALS.txt` tem o usuário e a senha do lab (gerados no primeiro start; para trocar, apague `auth.json` e `CREDENTIALS.txt` e reinicie o container).
-- `/opt/docker/spherex/lab/exports`: montado na API como `/catalog:ro` (`SPHEREX_CATALOG_DIR`) para `/api/catalogo`. Precisa existir (UID 1000) antes do deploy da stack; se o Docker criar a pasta, ela fica com dono root e o lab não consegue exportar.
-- `/opt/docker/spherex/current-sha`: SHA do último deploy concluído.
-- `/usr/local/sbin/spherex-deploy`: cópia root-owned de `deploy.sh`.
-- `/usr/local/bin/spherex-ssh-deploy`: cópia root-owned do comando SSH restrito.
-- `/etc/sudoers.d/spherex-deploy`: permite ao usuário de CI executar somente o script de deploy.
+- `/opt/docker/spherex/compose.yaml`: active Compose, initially copied by SCP and updated from releases.
+- `/opt/docker/spherex/.env`: independent API/frontend paths and domains; see `.env.example`.
+- `/opt/docker/spherex/api.env`: private API variables; see `api.env.example`. `PYTHON_API_URL` comes from Compose, not this file. Owner UID/GID 1000, mode 600, mounted read-only only in API. Node loads it directly without Portainer reading the host path.
+- `/opt/docker/spherex/repository.git`: bare clone of the public repository.
+- `/opt/docker/spherex/api-current-sha`, `frontend-current-sha`, `python-current-sha`: latest published releases per service.
+- `/opt/docker/spherex/cache`: Python writable cache, UID 1000; fully regenerable and safe to clear.
+- `/opt/docker/spherex/lab`: laboratory archive, UID 1000; frozen engines, records, version caches, product exports. **Not regenerable without hours of IRSA downloads; do not delete.** `CREDENTIALS.txt` stores the credentials generated on first start. To rotate them, delete `auth.json` and `CREDENTIALS.txt` and restart the container.
+- `/opt/docker/spherex/lab/exports`: mounted at `/catalog:ro` in API (`SPHEREX_CATALOG_DIR`) for `/api/catalogo`. Must exist with UID 1000 before stack deployment; if Docker creates it as root, lab cannot export.
+- `/opt/docker/spherex/current-sha`: last completed deployment SHA.
+- `/usr/local/sbin/spherex-deploy`: root-owned `deploy.sh` copy.
+- `/usr/local/bin/spherex-ssh-deploy`: root-owned restricted SSH command.
+- `/etc/sudoers.d/spherex-deploy`: permits the CI user to run only the deployment script.
 
-Os arquivos `.env` reais têm permissão 600 e não entram no Git. O único secret enviado ao GitHub é a chave exclusiva de deploy; credenciais de outras aplicações não são copiadas para esta stack. Alterações nos scripts instalados em `/usr/local` exigem nova cópia via SSH administrativo; a pipeline não sobrescreve seus próprios comandos privilegiados.
+Actual `.env` files have mode 600 and are never committed. GitHub receives only the dedicated deployment-key secret; other applications' credentials are not copied into this stack. Changes to installed `/usr/local` scripts require administrative SSH installation; the pipeline does not overwrite its own privileged commands.
 
-Antes do primeiro deploy independente, atualize uma vez os scripts root-owned no servidor com os arquivos deste repositório (`infra/deploy.sh` e `infra/ssh-deploy.sh`). A chave restrita do Actions não pode instalar esses scripts. Faça essa migração administrativa antes de publicar alterações de `infra/` que ativem os novos argumentos de deploy.
+Before the first independent-service deployment, update the root-owned server scripts once from `infra/deploy.sh` and `infra/ssh-deploy.sh`. The restricted Actions key cannot install them. Perform that administrative migration before publishing `infra/` changes requiring the new deployment arguments.
 
-Na raiz do repositório, copie os scripts e instale-os por SSH administrativo:
+From the repository root, copy and install the scripts through administrative SSH:
 
 ```sh
 scp infra/deploy.sh infra/ssh-deploy.sh ubuntu@150.230.73.212:/tmp/
@@ -52,35 +52,35 @@ ssh ubuntu@150.230.73.212 'sudo install -o root -g root -m 755 /tmp/deploy.sh /u
 
 ## Portainer
 
-Stack `spherex`, ambiente `local`. O Compose usa binds fixos para `/opt/docker/spherex/current-api` e `/opt/docker/spherex/current-frontend`, portanto cada serviço pode atualizar sua versão sem recriar o outro. A pipeline recria os serviços pelo Docker Compose no mesmo projeto que o Portainer gerencia. Não é necessário token administrativo do Portainer no Actions.
+Stack `spherex`, environment `local`. Compose uses fixed binds to `/opt/docker/spherex/current-api` and `/opt/docker/spherex/current-frontend`, allowing independent service updates. The pipeline recreates services with Docker Compose in the same project managed by Portainer. Actions needs no Portainer administrator token.
 
-Se alterar `infra/compose.yaml`, a pipeline aplica o novo arquivo na VPS; atualize também a definição salva no editor da stack antes de fazer um redeploy manual pelo Portainer. Um redeploy manual pela interface usa as releases apontadas pelos links `current-api`, `current-frontend` e `current-python` e a definição salva no Portainer. O script instalado aplica a definição do commit selecionado.
+If `infra/compose.yaml` changes, the pipeline applies it to the VPS. Also update the saved stack-editor definition before a manual Portainer redeployment. Manual redeployment uses the releases pointed to by `current-api`, `current-frontend`, `current-python`, and the saved Portainer definition. The installed script uses the selected commit's definition.
 
-## DNS e TLS
+## DNS and TLS
 
-Crie os dois registros A no Cloudflare apontando para `150.230.73.212`:
+Create Cloudflare A records pointing to `150.230.73.212`:
 
-| Nome na zona prospectordigital.com.br | Destino |
-| --- | --- |
+| Name in prospectordigital.com.br zone | Target |
+|---|---|
 | `spherex` | `150.230.73.212` |
 | `api.spherex` | `150.230.73.212` |
 | `lab.spherex` | `150.230.73.212` |
 
-Comece com **Somente DNS** (nuvem cinza): o resolver existente `lets-encrypt` usa TLS-ALPN e precisa alcançar a VPS diretamente na porta 443 para emitir e renovar certificados. Não ative proxy laranja enquanto este método de validação for usado. Não crie AAAA sem configurar IPv6 na VPS. A rota HTTP já redireciona para HTTPS no Traefik existente.
+Start in **DNS only** mode (gray cloud). Existing `lets-encrypt` uses TLS-ALPN and must reach VPS port 443 directly for certificate issuance/renewal. Do not enable the orange proxy while using this validation method. Do not create AAAA records without configuring VPS IPv6. Existing Traefik redirects HTTP to HTTPS.
 
-Depois da propagação, valide os certificados sem `-k`:
+After propagation, verify certificates without `-k`:
 
 ```sh
 curl --fail https://api.spherex.prospectordigital.com.br/healthz
 curl --fail https://spherex.prospectordigital.com.br/healthz
-curl -s -o /dev/null -w '%{http_code}\n' https://lab.spherex.prospectordigital.com.br/   # 401 sem senha
+curl -s -o /dev/null -w '%{http_code}\n' https://lab.spherex.prospectordigital.com.br/   # 401 without credentials
 ```
 
-O frontend usa `VITE_API_BASE_URL=https://api.spherex.prospectordigital.com.br` no build. A API permite CORS somente para `https://spherex.prospectordigital.com.br`. Alterar o domínio da API exige um novo build: ajuste a configuração da VPS e publique um novo commit, para gerar uma release com outro SHA.
+Frontend builds use `VITE_API_BASE_URL=https://api.spherex.prospectordigital.com.br`. API CORS accepts only `https://spherex.prospectordigital.com.br`. Changing the API domain requires a new frontend build: adjust VPS configuration and publish a new commit to produce a new release SHA.
 
-## Operação
+## Operations
 
-Conecte por `ssh ubuntu@150.230.73.212`. Na VPS:
+Connect with `ssh ubuntu@150.230.73.212`. On the VPS:
 
 ```sh
 sudo docker compose --project-name spherex --env-file /opt/docker/spherex/.env -f /opt/docker/spherex/compose.yaml ps
@@ -93,18 +93,18 @@ sudo cat /opt/docker/spherex/lab-current-sha
 sudo cat /opt/docker/spherex/lab/CREDENTIALS.txt
 ```
 
-Para copiar os dados do lab para o produto (hardlinks preservados):
+Copy lab exports while preserving hardlinks:
 
 ```sh
-sudo rsync -aH /opt/docker/spherex/lab/exports/ /caminho/de/destino/
+sudo rsync -aH /opt/docker/spherex/lab/exports/ /destination/path/
 ```
 
-Para rollback administrativo, substitua `SHA_ANTERIOR` por um commit completo que ainda pertence à `main`:
+For administrative rollback, replace `PREVIOUS_SHA` with a full commit still belonging to `main`:
 
 ```sh
-sudo env SPHEREX_ALLOW_ROLLBACK=1 /usr/local/sbin/spherex-deploy SHA_ANTERIOR stack
+sudo env SPHEREX_ALLOW_ROLLBACK=1 /usr/local/sbin/spherex-deploy PREVIOUS_SHA stack
 ```
 
-O rollback é manual por SSH administrativo; a chave do Actions não pode habilitar essa opção. O próximo push na `main` voltará a publicar a nova versão aprovada.
+Rollback is manual through administrative SSH; the Actions key cannot enable this option. The next push to `main` publishes the newly approved version again.
 
-Referências: [gatilhos e concorrência do GitHub Actions](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments), [labels do provider Docker do Traefik](https://doc.traefik.io/traefik/reference/routing-configuration/other-providers/docker/), [TLS-ALPN no Traefik](https://doc.traefik.io/traefik/reference/install-configuration/tls/certificate-resolvers/acme/#tlschallenge).
+References: [GitHub Actions deployment triggers/concurrency](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments), [Traefik Docker-provider labels](https://doc.traefik.io/traefik/reference/routing-configuration/other-providers/docker/), [Traefik TLS-ALPN](https://doc.traefik.io/traefik/reference/install-configuration/tls/certificate-resolvers/acme/#tlschallenge).

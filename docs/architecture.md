@@ -1,51 +1,51 @@
-# Arquitetura — CosmoSPHERE
+# Architecture — CosmoSPHERE
 
-O CosmoSPHERE combina uma interface web, um gateway público e um núcleo científico Python para explorar observações reais do SPHEREx. Visão de produto, equipe e execução local no [README principal](../README.md); contratos em [api.md](api.md).
+CosmoSPHERE combines a web interface, a public gateway, and a Python scientific core to explore real SPHEREx observations. Product overview, team, and local setup are in the [main README](../README.md); contracts are in [api.md](api.md).
 
-## Componentes
+## Components
 
-| Caminho | Responsabilidade |
+| Path | Responsibility |
 |---|---|
-| `frontend/` | React + TypeScript + Vite; mapa WebGL, formulário, visualizador temporal e espectros. O build é servido por `frontend/server.mjs` (Express) |
-| `backend/app/api/` | API Node/Express: `server.ts` inicia `createApp()` de `resultados.ts`; valida consultas, encaminha ao Python, reescreve URLs e serve o catálogo por `catalogo.ts` |
-| `backend/app/main.py` | FastAPI; validação, descoberta no IRSA e jobs científicos |
-| `backend/app/services/` | IRSA, cutouts FITS, calibração espectral, alinhamento, renderização, fotometria e gerenciadores de jobs |
-| `dev/temporal-lab/` | Laboratório com autenticação, motores científicos congelados por versão e exportação de alvos |
-| `infra/` | Docker Compose, Traefik, deploy por SSH, healthchecks e rollback |
-| `docs/` | Contrato da API, arquitetura, design system e PDF técnico |
+| `frontend/` | React + TypeScript + Vite; WebGL map, form, temporal viewer, spectra. `frontend/server.mjs` (Express) serves the build |
+| `backend/app/api/` | Node/Express API: `server.ts` starts `createApp()` from `resultados.ts`; query validation, Python forwarding, URL rewriting, catalog delivery through `catalogo.ts` |
+| `backend/app/main.py` | FastAPI; validation, IRSA discovery, scientific jobs |
+| `backend/app/services/` | IRSA, FITS cutouts, spectral calibration, alignment, rendering, photometry, job managers |
+| `dev/temporal-lab/` | Authenticated laboratory, frozen versioned engines, target export |
+| `infra/` | Docker Compose, Traefik, SSH deployment, healthchecks, rollback |
+| `docs/` | API contract, architecture, design system, technical PDF |
 
 ```text
-Navegador ─HTTPS─▶ Traefik ─┬─▶ frontend (Node :8080)
-                          ├─▶ api (Node :3000) ─HTTP─▶ python (FastAPI :8000) ─HTTPS─▶ IRSA
-                          │                     rede spherex_internal
-                          └─▶ lab (Python :8765, autenticação) ─▶ motores v1, v2… ─HTTPS─▶ IRSA
-                                           └─ exports/ ─somente leitura─▶ api /api/catalogo
+Browser --HTTPS--> Traefik --+--> frontend (Node :8080)
+                            +--> api (Node :3000) --HTTP--> python (FastAPI :8000) --HTTPS--> IRSA
+                            |                     spherex_internal network
+                            +--> lab (Python :8765, authenticated) --> v1, v2... engines --HTTPS--> IRSA
+                                             +-- exports/ --read-only--> api /api/catalogo
 ```
 
-## Fluxo de dados
+## Data flow
 
-1. O frontend transforma coordenadas ou a seleção do mapa em uma consulta transportada na URL do visualizador.
-2. Um alvo pré-mapeado usa o catálogo exportado pelo laboratório. Partes ausentes, ou coordenadas novas, usam a API pública.
-3. A API encaminha `/api/consulta` a `/receber-dados` no Python. Para imagens, a resposta contém metadados e `sequencia.status_url`; para espectro, `status_url` e o estado do job.
-4. O serviço científico consulta metadados SIA2, seleciona observações com cobertura suficiente, baixa recortes FITS e processa imagens ou fotometria em segundo plano.
-5. O frontend acompanha os jobs e exibe camadas/gráficos à medida que ficam prontos. A API reescreve caminhos internos sob `/api/sequencias/…` e `/api/espectros/…`.
+1. The frontend turns coordinates or a map selection into a query carried in the viewer URL.
+2. A pre-mapped target uses the laboratory-exported catalog. Missing portions or new coordinates use the public API.
+3. The API forwards `/api/consulta` to Python's `/receber-dados`. Image responses contain metadata and `sequencia.status_url`; spectra contain `status_url` and job state.
+4. The scientific service queries SIA2 metadata, selects observations with sufficient coverage, downloads FITS cutouts, and processes images or photometry in the background.
+5. The frontend follows jobs and displays layers/charts as they become ready. The API rewrites internal paths under `/api/sequencias/…` and `/api/espectros/…`.
 
-Alinhamento espacial, calibração de comprimento de onda e cálculo de fluxo ocorrem no Python. A falsa cor e os WebPs são derivados de exibição; os FITS continuam sendo a fonte científica.
+Spatial alignment, wavelength calibration, and flux calculation take place in Python. False color and WebP frames are display derivatives; FITS remains the scientific source.
 
-## Persistência e execução
+## Persistence and execution
 
-Não há banco de dados nem fila externa. `SequenceJobManager` e `SpectrumJobManager` executam jobs em threads, em um processo; seus estados ficam em memória. Reiniciar o processo perde esses estados, mas preserva os arquivos em cache. Metadados, FITS, matrizes alinhadas, frames, fotometria e gráficos são reutilizados por identificadores derivados dos parâmetros.
+There is no database or external queue. `SequenceJobManager` and `SpectrumJobManager` execute threaded jobs in one process and keep their states in memory. Restarting loses job state but retains cached files. Metadata, FITS, aligned arrays, frames, photometry, and charts are reused through parameter-derived identifiers.
 
-O cache regenerável de produção fica em `/opt/docker/spherex/cache`. O acervo do laboratório fica em `/opt/docker/spherex/lab`, incluindo motores congelados, dados e exportações. Esse acervo exige preservação: reconstruí-lo depende de horas de downloads.
+The regenerable production cache lives at `/opt/docker/spherex/cache`. The laboratory archive at `/opt/docker/spherex/lab` includes frozen engines, data, and exports. Preserve it: reconstruction requires hours of downloads.
 
-## Fronteiras de produção
+## Production boundaries
 
-Frontend, API, Python e laboratório usam containers separados. Traefik publica **frontend, API e laboratório** por HTTPS; o laboratório exige HTTP Basic. O Python não tem rota pública e é acessado pela API em `http://spherex-python:8000`. O volume de exportações é montado somente leitura na API (`SPHEREX_CATALOG_DIR=/catalog`).
+Frontend, API, Python, and laboratory run in separate containers. Traefik publishes **frontend, API, and laboratory** over HTTPS; the laboratory requires HTTP Basic. Python has no public route and is reached by the API at `http://spherex-python:8000`. The exports volume is read-only in the API (`SPHEREX_CATALOG_DIR=/catalog`).
 
-A API pública não exige token nem aplica rate limiting. Seu CORS aceita a origem `FRONTEND_ORIGIN`. O cliente IRSA restringe downloads HTTPS ao host `irsa.ipac.caltech.edu`.
+The public API requires no token and applies no rate limiting. CORS accepts `FRONTEND_ORIGIN`. The IRSA client restricts HTTPS downloads to `irsa.ipac.caltech.edu`.
 
 ## CI/CD
 
-O [workflow](../.github/workflows/ci-cd.yml) detecta os caminhos alterados e valida os projetos afetados. Pushes aprovados na `main` publicam os serviços correspondentes, verificam `/healthz` e voltam à release anterior se houver falha. Cada serviço informa seu próprio SHA; serviços não alterados podem permanecer em SHAs anteriores.
+The [workflow](../.github/workflows/ci-cd.yml) detects changed paths and validates affected projects. Approved pushes to `main` publish the corresponding services, check `/healthz`, and restore the previous release on failure. Each service reports its own SHA; unchanged services may remain on previous SHAs.
 
-Mudanças apenas no README da raiz e em `docs/` não selecionam um serviço para deploy. Arquivos dentro de `frontend/` ou `backend/`, inclusive documentação, seguem os filtros desses diretórios. Operação detalhada em [infra/README.md](../infra/README.md).
+Changes only to root README and `docs/` do not select a service for deployment. Files under `frontend/` or `backend/`, including documentation, follow those directories' filters. See [infra/README.md](../infra/README.md) for operations.

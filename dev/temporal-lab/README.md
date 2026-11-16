@@ -1,111 +1,67 @@
 # SPHEREx Lab
 
-Laboratório para mapear alvos conhecidos (constelações, regiões, estrelas
-famosas) e guardar tudo o que o produto vai precisar: FITS, imagens
-renderizadas em todas as variantes e espectros. Publicado em
-<https://lab.spherex.prospectordigital.com.br> (senha HTTP Basic) e também roda
-localmente. Não faz parte do frontend do produto.
+Laboratory for mapping known targets (constellations, regions, familiar stars) and storing everything the product needs: FITS files, images in every rendering variant, and spectra. Published at <https://lab.spherex.prospectordigital.com.br> with HTTP Basic authentication; also runs locally. It is separate from the product frontend.
 
-## Arquitetura
+## Architecture
 
-```
-navegador ─▶ server.py (gateway :8765)
-               ├─ interface (public/), registros, fila de mapeamento, exportação
-               ├─▶ motor v1: engines/v1/code/dev/temporal-lab/engine_server.py (127.0.0.1:8801)
-               └─▶ motor v2: engines/v2/code/…                              (127.0.0.1:8802)
+```text
+browser --> server.py (gateway :8765)
+               +-- interface (public/), records, mapping queue, exports
+               +--> v1 engine: engines/v1/code/dev/temporal-lab/engine_server.py (127.0.0.1:8801)
+               +--> v2 engine: engines/v2/code/...                             (127.0.0.1:8802)
 ```
 
-- `server.py`: gateway. Serve a interface, autentica, guarda os registros,
-  calcula a cobertura a partir do disco, executa a fila de mapeamento e exporta.
-- `engine_server.py`: a API científica (sequências, pré-carregamento, espectro).
-  Cada **versão do motor** roda este arquivo a partir de uma cópia congelada de
-  `backend/app` + `engine_server.py`, em subprocesso próprio e com cache próprio.
-- `lab_store.py`: persistência (motores, registros, cobertura, exportação), sem
-  dependências científicas. Testes em `tests/`.
+- `server.py`: gateway. Serves UI, authenticates, stores records, calculates disk-based coverage, runs the mapping queue, exports targets.
+- `engine_server.py`: scientific API (sequences, prefetching, spectra). Each **engine version** runs it from a frozen `backend/app` + `engine_server.py` copy, in its own subprocess with its own cache.
+- `lab_store.py`: engine, record, coverage, and export persistence, without scientific dependencies. Tests are in `tests/`.
 
-### Diretório de dados (`SPHEREX_LAB_DATA_DIR`)
+### Data directory (`SPHEREX_LAB_DATA_DIR`)
 
-| Caminho | Conteúdo |
+| Path | Contents |
 |---|---|
-| `engines/<v>/engine.json` | título, descrição, commit e hash do código congelado |
-| `engines/<v>/code/` | cópia de `backend/app/**/*.py` e `engine_server.py` |
-| `engines/<v>/cache/` | datasets, FITS, matrizes alinhadas, WebPs, espectros e `calibration/` |
-| `engines/<v>/results/<registro>/` | resumo do espectro (temas escuro e claro) |
-| `records/<id>.json` | alvo: nome, descrição, RA/Dec, plano e estado do mapeamento |
-| `exports/<v>/index.json` | catálogo dos alvos exportados |
-| `exports/<v>/<slug>/` | `manifest.json` + `frames/` + `spectrum/` (hardlinks do cache) |
-| `auth.json`, `CREDENTIALS.txt` | credenciais geradas no primeiro start (só com `SPHEREX_LAB_AUTH=required`) |
+| `engines/<v>/engine.json` | Title, description, commit, frozen-code hash |
+| `engines/<v>/code/` | Copy of `backend/app/**/*.py` and `engine_server.py` |
+| `engines/<v>/cache/` | Datasets, FITS, aligned arrays, WebPs, spectra, `calibration/` |
+| `engines/<v>/results/<record>/` | Spectrum summary in dark/light themes |
+| `records/<id>.json` | Target name, description, RA/Dec, mapping plan/state |
+| `exports/<v>/index.json` | Exported-target catalog |
+| `exports/<v>/<slug>/` | `manifest.json` + `frames/` + `spectrum/`, hardlinked from cache |
+| `auth.json`, `CREDENTIALS.txt` | Credentials generated on first start, only with `SPHEREX_LAB_AUTH=required` |
 
-Em produção: `/opt/docker/spherex/lab` (montado em `/data`). O cabeçalho do lab
-mostra o espaço livre em disco: cada alvo mapeado em um FOV ocupa da ordem de
-1 GB (FITS, matrizes alinhadas e WebPs), e a VPS é compartilhada com outros projetos.
+Production: `/opt/docker/spherex/lab`, mounted at `/data`. The lab header displays free disk space. Each target mapped at one FOV occupies approximately 1 GB of FITS, aligned arrays, and WebPs; the VPS is shared with other projects.
 
-## Versões do motor
+## Engine versions
 
-- No primeiro start é criada a `v1` a partir do código da release.
-- Uma versão nunca muda de código. Quando uma release traz código novo do
-  backend (`backend/app/**/*.py` ou `engine_server.py`), a aba **Versões do
-  motor** mostra um aviso e permite congelá-lo como nova versão, com título e
-  descrição (ex.: “v2 — espectro com menos pontos, mais rápido”).
-- O seletor **Motor** escolhe a versão usada para explorar e mapear. Registros e
-  caches de outras versões continuam intactos.
-- As versões usam o venv da release atual: se uma versão nova exigir outra
-  dependência, as antigas continuam com a mesma lista de pacotes.
+- On first start, `v1` is created from release code.
+- A version's code never changes. When a release introduces new backend code (`backend/app/**/*.py` or `engine_server.py`), the **Engine versions** tab shows a notice and allows freezing it as a new version with a title and description, such as “v2 — spectrum with fewer points, faster.” UI labels may retain their original implementation language.
+- The **Engine** selector chooses the version for exploration and mapping. Other versions' records and caches remain intact.
+- Versions use the current release's venv; if a new version requires a dependency, older engines continue using that same package environment.
 
-### V2 - Geração de Espectro Otimizada
+### V2 — Optimized spectrum generation
 
-Esta versão mede λ somente nos quatro pixels necessários à interpolação
-bilinear e limita o processamento de IMAGE/VARIANCE à janela da abertura e do
-anel de fundo. Mantém todas as observações, a precisão float32 e os resultados
-da fotometria. Os benchmarks com FITS locais estão em
-[`dev/benchmarks/README.md`](../benchmarks/README.md).
+This version evaluates λ only at the four pixels needed for bilinear interpolation and restricts IMAGE/VARIANCE processing to the aperture/background-annulus window. It retains all observations, float32 precision, and photometric results. Local FITS benchmarks are in [`dev/benchmarks/README.md`](../benchmarks/README.md).
 
-Após publicar o código, crie uma nova versão na aba **Versões do motor**, com o
-título **V2 - Geração de Espectro Otimizada**, e selecione-a no campo **Motor**.
-Em um acervo que contém apenas `v1`, ela será registrada como `v2`. A numeração
-é sequencial por acervo; esta atualização não renomeia versões nem modifica
-código, cache ou resultados de motores já congelados. A versão do formato de
-fotometria (`SPECTRUM_VERSION`) permanece igual, pois seu contrato não mudou.
+After publishing the code, create a new version in **Engine versions**, title it **V2 - Optimized Spectrum Generation**, and select it in **Engine**. In an archive containing only `v1`, it will be recorded as `v2`. Numbering is sequential per archive; the update does not rename versions or modify frozen engines' code, caches, or results. Photometry format version `SPECTRUM_VERSION` stays unchanged because its contract has not changed.
 
-## Registros e mapeamento
+## Records and mapping
 
-- Cada busca salva um **registro** por coordenada (nome e descrição opcionais,
-  editáveis depois). Os registros são compartilhados entre todos que usam o lab.
-- RA aceita graus (`133.795`) ou horas (`08h55m10.8s`, `08 55 10.8`,
-  `08:55:10.8`). Dec aceita graus (`-7.245`) ou `−07°14′42″`, `-07 14 42`,
-  `-07:14:42`.
-- **Mapear…** coloca o alvo na fila do servidor (pode fechar a aba). Para cada
-  FOV e banda escolhidos, baixa todas as épocas (modo completo) e renderiza as
-  10 variantes (5 perfis × falsa cor/mono); mede o espectro das bandas
-  escolhidas e gera os gráficos nos temas escuro e claro. Falhas do IRSA
-  (502/503) são repetidas com espera de 5, 20 e 60 s; o que já foi baixado não
-  é refeito. Ao terminar, exporta o alvo. A fila sobrevive a reinícios e deploys.
-- A aba **Registros** mostra, por motor: estado geral (100% mapeado, parcial,
-  com erro, na fila, mapeando), FOVs e bandas com percentual de FITS e de
-  imagens renderizadas, espectro por banda e as falhas do último mapeamento.
-  Com um plano de mapeamento, o “100%” mede o que foi pedido; explorações
-  avulsas em outros FOVs aparecem com badge tracejado.
-- **Não há como apagar** registros nem caches pela interface: cada alvo mapeado custa horas de
-  download do IRSA. A API responde 403 a `DELETE /api/records/<id>` e `DELETE /api/e/<v>/cache/…`;
-  só com `SPHEREX_LAB_ALLOW_DELETE=1` (uso administrativo, por `curl`) a exclusão volta a funcionar.
+- Every search saves a **record** per coordinate. Name and description are optional and editable. Records are shared by everyone using the lab.
+- RA accepts degrees (`133.795`) or hours (`08h55m10.8s`, `08 55 10.8`, `08:55:10.8`). Dec accepts degrees (`-7.245`), `−07°14′42″`, `-07 14 42`, or `-07:14:42`.
+- **Map…** adds a target to the server queue; the browser tab may be closed. For each selected FOV/band, it downloads all epochs (complete mode), renders 10 variants (five profiles × false color/mono), measures requested-band spectra, and generates charts in both themes. IRSA 502/503 failures retry after 5, 20, and 60 s; previously downloaded data are reused. The target is exported on completion. The queue survives restarts and deployments.
+- **Records** displays per-engine overall state (fully mapped, partial, error, queued, mapping), FOVs/bands with FITS/rendered-image percentages, per-band spectra, and the latest mapping failures. With a mapping plan, “100%” refers to requested work; unrelated FOV exploration appears with a dashed badge.
+- **Records and caches cannot be deleted through the UI:** every mapped target costs hours of IRSA downloading. The API returns 403 to `DELETE /api/records/<id>` and `DELETE /api/e/<v>/cache/…`. Administrative deletion via `curl` is enabled only with `SPHEREX_LAB_ALLOW_DELETE=1`.
 
-## Exportação para o produto
+## Product export
 
-`exports/<v>/<slug>/manifest.json` (`schema: spherex-lab-target/1`):
+`exports/<v>/<slug>/manifest.json`, schema `spherex-lab-target/1`:
 
-- `name`, `description`, `ra_deg`, `dec_deg`, `engine`;
-- `sequences[]`: uma por FOV/amostragem/variante (`key` = `30-native/limpa-color`),
-  com `frames[].layers[]` no mesmo formato de `/api/sequencias/<id>` e
-  `image_url` relativo à pasta do alvo. Só entram bandas com todas as épocas
-  renderizadas naquela variante (`omitted_bandpasses` lista as demais);
-- `spectrum.dark` / `spectrum.light`: mesmo formato do resultado de
-  `/api/espectros/<id>`, com `combined_chart_url` e `chart_url` relativos.
+- `name`, `description`, `ra_deg`, `dec_deg`, `engine`.
+- `sequences[]`: one per FOV/sampling/variant, such as key `30-native/limpa-color`; `frames[].layers[]` matches `/api/sequencias/<id>`, with `image_url` relative to the target folder. Only bands with every epoch rendered in that variant are included; `omitted_bandpasses` lists others.
+- `spectrum.dark` / `spectrum.light`: same result format as `/api/espectros/<id>`, with relative `combined_chart_url` and `chart_url`.
 
-Os arquivos são hardlinks do cache (não ocupam espaço extra). Para levar ao
-produto, copie `exports/<v>/` (com `cp -a`/`rsync -H`). O lab também serve
-`/exports/<v>/index.json` e os arquivos para inspeção.
+Files are hardlinks to the cache, requiring no additional file-data storage. Copy `exports/<v>/` with `cp -a`/`rsync -H` for product use. The lab also serves `/exports/<v>/index.json` and files for inspection.
 
-## Executar localmente
+## Running locally
 
 ```bash
 SPHEREX_LAB_DATA_DIR="/Users/caio/Documents/Dev/NASA/NSA SphereX/dev/results/temporal-lab-data" \
@@ -113,28 +69,17 @@ SPHEREX_LAB_CACHE_DIR="/Users/caio/Documents/Dev/NASA/NSA SphereX/dev/results/te
   "/Users/caio/Documents/Dev/NASA/NSA SphereX/dev/.venv/bin/python" dev/temporal-lab/server.py --port 8766
 ```
 
-- `SPHEREX_LAB_CACHE_DIR` (opcional) liga um cache antigo à `v1` na primeira
-  execução.
-- Sem `SPHEREX_LAB_AUTH=required` não há senha (uso local).
-- Os motores usam as portas `SPHEREX_LAB_ENGINE_BASE_PORT + n` (padrão 8800).
+- Optional `SPHEREX_LAB_CACHE_DIR` attaches a previous cache to `v1` on first run.
+- Without `SPHEREX_LAB_AUTH=required`, local use has no password.
+- Engines use ports `SPHEREX_LAB_ENGINE_BASE_PORT + n`, default base 8800.
 
-Testes: `python3 -m unittest discover -s dev/temporal-lab/tests -p 'test_*.py'`
-e `node --test dev/temporal-lab/tests/*.test.mjs`.
+Tests: `python3 -m unittest discover -s dev/temporal-lab/tests -p 'test_*.py'` and `node --test dev/temporal-lab/tests/*.test.mjs`.
 
-## Renderização e espectro
+## Rendering and spectra
 
-- **Renderização**: Original, Limpa, Suave, Difusa e Pontual. Trocar o preset
-  reaproveita os FITS e a matriz alinhada; só a imagem é refeita.
-- **Cor**: falsa cor por pixel (`WCS-WAVE`) ou monocromático; várias bandas se
-  sobrepõem com mistura `screen`.
-- **Configurações**: janela final de 10′ a 40′ (o recorte baixado é 1,5× a
-  janela) e amostragem nativa (6,15″/px) ou 2× interpolada (3,08″/px).
-- **Espectro**: fotometria forçada (abertura 3 px, fundo local 6–10 px) em
-  todas as observações; o filtro varia ao longo do detector, então cada visita
-  mede o alvo em um único λ (`WCS-WAVE`). Recortes de 4′ baixados só até a
-  `VARIANCE`; a tabela `WCS-WAVE` fica em `calibration/` por detector.
-  Limitações: sem movimento próprio (WISE 0855 sai da abertura), sem correção
-  de abertura, `FLAGS` não usadas.
+- **Rendering:** `original`, `limpa`, `suave`, `difusa`, `pontual`. Switching presets reuses FITS and aligned arrays, regenerating only the display image.
+- **Color:** per-pixel false color (`WCS-WAVE`) or monochrome; multiple bands overlap using `screen` blending.
+- **Settings:** final 10′–40′ window, with a downloaded cutout 1.5× larger; native sampling 6.15″/px or interpolated 2× sampling 3.08″/px.
+- **Spectrum:** forced photometry (3 px aperture, 6–10 px local background annulus) in every observation. The filter varies across the detector, so each visit measures the target at one λ (`WCS-WAVE`). The 4′ cutouts are downloaded through VARIANCE only; `WCS-WAVE` is cached by detector under `calibration/`. Limits: no proper-motion propagation (WISE 0855 leaves the aperture), no aperture correction, FLAGS unused.
 
-A falsa cor é uma codificação de visualização: preserva a ordem e o espaçamento
-fracionário dos comprimentos de onda, mas não é uma fotografia em luz visível.
+False color encodes visualization: it preserves wavelength order and fractional spacing, but is not a visible-light photograph.
