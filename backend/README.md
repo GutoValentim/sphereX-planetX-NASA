@@ -1,136 +1,79 @@
-# Backend científico — CosmoSPHERE
+# Scientific backend — CosmoSPHERE
 
-Serviços Python que consultam e processam dados da SPHEREx, expostos à API Node
-pelo FastAPI em `app/main.py` (contratos em [docs/api.md](../docs/api.md)).
-A API pública Node/Express fica em `app/api/server.ts` → `app/api/resultados.ts`;
-o Python permanece na rede interna em produção.
+Python services query and process SPHEREx data, exposed to the Node API through FastAPI in `app/main.py`; see the [API contract](../docs/api.md). The public Node/Express entry path is `app/api/server.ts` → `app/api/resultados.ts`. Python remains on the internal network in production.
 
 ```sh
 cd backend
 pip install -r requirements-dev.txt
-uvicorn app.main:app --port 8000 --reload   # API Node: PYTHON_API_URL=http://localhost:8000
+uvicorn app.main:app --port 8000 --reload   # Node API: PYTHON_API_URL=http://localhost:8000
 python -m unittest discover -s tests -p 'test_*.py'
 ```
 
-## Dependências atuais
+## Current dependencies
 
-- `astroquery`: consulta SIA2 ao NASA/IPAC IRSA;
-- `astropy`: coordenadas, tempo, tabelas, FITS e WCS.
-- `pyvo`: tratamento dos protocolos e erros do Virtual Observatory;
-- `numpy`: normalização e transformação matricial da extensão `IMAGE`;
-- `Pillow`: codificação dos frames em PNG, WebP ou JPEG;
-- `requests`: download HTTPS dos arquivos e cutouts FITS.
-- `reproject`: reprojeção de cada FITS para uma grade WCS celeste comum;
-- `scipy`: filtros, preenchimento de núcleos saturados e operações de imagem;
-- `FastAPI`, `Pydantic` e `uvicorn`: HTTP interno, validação e servidor ASGI.
+- `astroquery`: NASA/IPAC IRSA SIA2 queries.
+- `astropy`: coordinates, time, tables, FITS, WCS.
+- `pyvo`: Virtual Observatory protocols and errors.
+- `numpy`: normalization and array transformations of IMAGE.
+- `Pillow`: PNG, WebP, JPEG frame encoding.
+- `requests`: HTTPS file and FITS-cutout downloads.
+- `reproject`: reprojection of each FITS onto a common celestial WCS grid.
+- `scipy`: filters, saturated-core filling, image operations.
+- `FastAPI`, `Pydantic`, `uvicorn`: internal HTTP, validation, ASGI server.
 
-Versões suportadas em [`requirements.txt`](requirements.txt).
+Supported versions are in [`requirements.txt`](requirements.txt).
 
-## Serviços implementados
+## Implemented services
 
-- `IrsaClient.query_table`: preserva a tabela científica devolvida pelo SIA2;
-- `IrsaClient.search`: converte as linhas para modelos serializáveis;
-- `IrsaClient.download`: baixa um FITS completo ou um cutout;
-- `inspect_fits`: lista HDUs, metadados e verifica se o alvo está dentro da imagem.
-- `generate_frame`: converte a extensão científica `IMAGE` em um frame 8-bit com
-  normalização por percentis e stretch `asinh`.
-- `build_common_sky_grid`: cria uma grade TAN quadrada, norte-para-cima e com o
-  RA/Dec solicitado exatamente no pixel central;
-- `align_fits_image`: reprojeta a WCS/SIP de cada observação para a grade comum
-  e mede a fração efetivamente coberta; quando o FITS fornece `WCS-WAVE`, o
-  mapa calibrado de comprimento de onda por pixel é reprojetado junto;
-- `spectral_color`: descreve D1–D6 e translada 0,744–5,002 µm para a faixa
-  visível de exibição 420–640 nm em escala logarítmica;
-- `SpherexImageService.create_preview`: recebe RA, Dec e FOV, seleciona uma
-  observação compatível, baixa o cutout e devolve a imagem com seus metadados.
-- `SpherexTemporalSequenceService.create_sequence`: recebe RA e Dec, consulta o
-  SIA2, seleciona até 100 observações D3 cujas pegadas contêm integralmente o
-  recorte-fonte de 45 arcmin, baixa esses cutouts em paralelo e gera uma
-  sequência WebP com manifesto JSON ordenado pelo horário de observação. A
-  margem externa preserva a janela menor durante rotações de até qualquer ângulo.
-- `SpherexTemporalSequenceService.discover_dataset`: consulta apenas metadados e
-  reutiliza `dataset.json` para repetir coordenadas sem nova chamada à IRSA;
-- `SpherexTemporalSequenceService.select_indices`: oferece os modos rápido (até
-  4), balanceado (até 12) e completo (até 100);
-- `SpherexTemporalSequenceService.materialize_frame`: baixa e converte apenas o
-  índice solicitado pelo consumidor;
-- `SpherexTemporalSequenceService.clear_cache`: remove um dataset validado ou
-  todos os artefatos regeneráveis da raiz de cache dedicada.
-- `SequenceJobManager`: gerencia as sequências multibanda em segundo plano,
-  escolhe as épocas na banda de referência (D3 por padrão), pareia as demais
-  pela observação mais próxima no tempo e publica as camadas conforme ficam prontas.
+- `IrsaClient.query_table`: preserves the scientific table returned by SIA2.
+- `IrsaClient.search`: converts rows into serializable models.
+- `IrsaClient.download`: downloads a full FITS file or cutout.
+- `inspect_fits`: lists HDUs/metadata and checks whether a target is inside the image.
+- `generate_frame`: converts scientific IMAGE into an 8-bit frame using percentile normalization and asinh stretch.
+- `build_common_sky_grid`: creates a square, north-up TAN grid with the requested RA/Dec exactly at the central pixel.
+- `align_fits_image`: reprojects each observation's WCS/SIP to the common grid and measures coverage. When `WCS-WAVE` is present, the calibrated per-pixel wavelength map is reprojected too.
+- `spectral_color`: describes D1–D6 and maps 0.744–5.002 µm logarithmically into the visible display range 420–640 nm.
+- `SpherexImageService.create_preview`: accepts RA, Dec, FOV, selects a compatible observation, downloads a cutout, and returns an image with metadata.
+- `SpherexTemporalSequenceService.create_sequence`: accepts RA/Dec, queries SIA2, selects up to 100 D3 observations whose footprints fully contain the 45 arcmin source cutout, downloads those cutouts in parallel, and produces a WebP sequence with a time-sorted JSON manifest. The outer margin preserves the smaller viewing window under any rotation angle.
+- `SpherexTemporalSequenceService.discover_dataset`: metadata-only discovery, reusing `dataset.json` to avoid repeated IRSA calls.
+- `SpherexTemporalSequenceService.select_indices`: fast (up to 4), balanced (up to 12), complete (up to 100) modes.
+- `SpherexTemporalSequenceService.materialize_frame`: downloads and converts only the requested index.
+- `SpherexTemporalSequenceService.clear_cache`: removes a validated dataset or all regenerable artifacts in the dedicated cache root.
+- `SequenceJobManager`: manages background multiband sequences, selects anchor-band epochs (D3 by default), pairs other bands to the nearest observation in time, and publishes layers as ready.
 
-O motor temporal reprojeta todos os frames para a mesma grade TAN e retorna
-`aligned: true`. A correção usa a WCS completa de cada FITS, incluindo a
-distorção SIP quando presente, em vez de supor um deslocamento uniforme em RA,
-Dec ou pixels. As sequências usam escala fixa de 6,15 segundos de arco por pixel,
-permitindo sobrepor D1–D6 na mesma grade sem redimensionamento posterior. Os FITS
-ficam em cache por combinação de coordenadas, banda,
-coleções e período. O cache de previews possui versão própria; imagens antigas
-sem alinhamento são regeneradas automaticamente.
+The temporal engine reprojects every frame onto the same TAN grid and returns `aligned: true`. It uses each FITS file's complete WCS, including SIP distortion when present, instead of assuming uniform RA/Dec or pixel shifts. Sequences use a fixed scale of 6.15 arcseconds per pixel so D1–D6 can be overlaid without subsequent resizing. FITS files are cached by coordinates, band, collections, and period. Preview caching has its own version; older unaligned images are regenerated automatically.
 
-Os frames temporais são WebPs RGBA de falsa cor. A intensidade continua vindo
-da extensão científica monocromática; somente a representação web recebe cor e
-opacidade 0,82. A cor é calculada por pixel a partir de `WCS-WAVE`. Em arquivos
-sem esse mapa, é usado o centro geométrico da banda selecionada. A transformação
-logarítmica preserva espaçamentos fracionários `Δλ/λ`; o limite visual de 640 nm
-evita que D5 e D6 colapsem para o mesmo vermelho no gamut sRGB. Essa cor não
-representa luz visível medida pelo SPHEREx.
+Temporal frames are false-color RGBA WebPs. Intensity still comes from the monochrome scientific extension; only the web representation receives color and 0.82 opacity. Color is calculated per pixel from `WCS-WAVE`; when absent, the selected band's geometric center is used. The logarithmic transformation preserves fractional spacing `Δλ/λ`; the 640 nm display limit prevents D5 and D6 from collapsing into the same red in sRGB. This color is not visible light measured by SPHEREx.
 
-### Perfis de renderização (`frame_generator.RENDER_PROFILES`)
+### Rendering profiles (`frame_generator.RENDER_PROFILES`)
 
-Escolhas de exibição aplicadas igualmente a todas as épocas e bandas; o FITS e a
-matriz alinhada não mudam:
+Display choices applied equally to all epochs and bands; FITS and aligned arrays are unchanged:
 
-| Perfil | Fundo | Ponto preto | Curva | Extra |
+| Profile | Background | Black point | Stretch | Extra |
 |---|---|---|---|---|
-| `original` | nenhum | percentil 1 | asinh a=0,1 | comportamento anterior |
-| `limpa` | local (malha ~1/6 da imagem, sigma-clipping) | 0,5σ do ruído | asinh a=0,2 | núcleos saturados preenchidos |
-| `suave` | local | 0,5σ | asinh a=0,2 | gaussiana 0,8 px |
-| `difusa` | só nível global | mediana | asinh a=0,15 | gaussiana 0,5 px; preserva nebulosidade |
-| `pontual` | local | 2,5σ | raiz quadrada | quase só fontes compactas |
+| `original` | None | Percentile 1 | asinh a=0.1 | Previous behavior |
+| `limpa` | Local, mesh ~1/6 of image, sigma clipping | 0.5σ noise | asinh a=0.2 | Saturated cores filled |
+| `suave` | Local | 0.5σ | asinh a=0.2 | Gaussian 0.8 px |
+| `difusa` | Global level only | Median | asinh a=0.15 | Gaussian 0.5 px; preserves nebulosity |
+| `pontual` | Local | 2.5σ | Square root | Primarily compact sources |
 
-O fundo local remove a luz zodiacal (não subtraída na extensão `IMAGE`) e
-gradientes suaves; fontes compactas são rejeitadas por sigma-clipping. Por isso
-`limpa`/`pontual` atenuam emissão estendida maior que ~1/6 do campo; para
-nebulosas, use `difusa`. Núcleos saturados (NaN cercados por pixels válidos, até
-64 px) recebem o maior valor vizinho só na imagem. O intervalo de exibição do
-primeiro frame é reutilizado em todas as épocas de cada variante
-(`perfil-cor`), então comparações temporais continuam válidas.
+Local background removal subtracts zodiacal light (not subtracted in IMAGE) and smooth gradients; sigma clipping rejects compact sources. `limpa`/`pontual` therefore attenuate extended emission larger than approximately one-sixth of the field; use `difusa` for nebulae. Saturated cores (NaN surrounded by valid pixels, up to 64 pixels) receive the largest neighboring value in the display image only. The first frame's display interval is reused for all epochs in each `profile-color` variant, preserving a common temporal display scale.
 
-### Espectro (`spectrum_service`, `spectrum_chart`)
+### Spectrum (`spectrum_service`, `spectrum_chart`)
 
-`SpherexSpectrumService.spectrum(ra_deg, dec_deg, bandpasses, output_directory)`
-mede o alvo em todas as observações das bandas pedidas (fotometria de abertura
-com fundo local, λ do `WCS-WAVE` no pixel do alvo, erro pela `VARIANCE`) e grava
-SVGs (`spectrum_chart.render_spectrum_svg`, sem matplotlib) com nome por hash de
-conteúdo. `IrsaClient.download_hdus` baixa o cutout só até a extensão pedida.
-No FastAPI, `POST /receber-dados` com `elemento: "espectro"` inicia um job
-(`spectrum_jobs.SpectrumJobManager`, compartilhado com o laboratório, que usa
-`output: "spectrum"`); `GET /espectros/<id>` acompanha e
-`GET /espectros/arquivos/...svg` serve os gráficos. Contrato em `docs/api.md`.
+`SpherexSpectrumService.spectrum(ra_deg, dec_deg, bandpasses, output_directory)` measures the target in all observations of the requested bands using aperture photometry, local background, target-pixel `WCS-WAVE` λ, and `VARIANCE` uncertainties. It writes content-hashed SVGs through `spectrum_chart.render_spectrum_svg`, without matplotlib. `IrsaClient.download_hdus` downloads cutouts only through the requested extension.
 
-A fotometria processa apenas a janela da abertura e do anel de fundo; λ é
-interpolado dos quatro pixels vizinhos, com a mesma precisão do mapa completo.
-Todas as observações continuam sendo medidas. Para comparar desempenho e
-experimentar limites de visitas usando apenas FITS locais, veja
-[`dev/benchmarks/README.md`](../dev/benchmarks/README.md).
+In FastAPI, `POST /receber-dados` with `elemento: "espectro"` starts a job (`spectrum_jobs.SpectrumJobManager`, shared with the laboratory, which uses `output: "spectrum"`). Poll `GET /espectros/<id>` and retrieve charts through `GET /espectros/arquivos/...svg`. See [docs/api.md](../docs/api.md).
 
-Limitações: sem propagação de movimento próprio (alvos rápidos saem da
-abertura), sem correção de abertura (valor absoluto alguns % abaixo; forma
-preservada) e FLAGS não usadas até termos a tabela oficial de bits.
+Photometry processes only the aperture/background-annulus window. λ is interpolated from four neighboring pixels with the same precision as a full map. All observations are still measured. To compare performance and experiment with visit limits using local FITS only, see [`dev/benchmarks/README.md`](../dev/benchmarks/README.md).
 
-O FITS continua sendo a fonte científica. Os frames são derivados para exibição.
-Na comparação entre épocas, todos os frames devem usar o mesmo intervalo
-`display_min`/`display_max`; normalizar cada época separadamente pode criar uma
-falsa impressão de variação de brilho.
+Limitations: no proper-motion propagation (fast targets leave the aperture), no aperture correction (absolute flux a few percent low; shape preserved), and FLAGS unused until official bit definitions are available in code.
 
-O download aceita somente URLs HTTPS do domínio oficial
-`irsa.ipac.caltech.edu`. Para experimentação, prefira cutouts e limite a
-quantidade de arquivos baixados.
+FITS remains the scientific source. Frames are display derivatives. When comparing epochs, use the same `display_min`/`display_max`; independent normalization can create an artificial impression of brightness variation.
 
-## Referências
+Downloads accept only HTTPS URLs from `irsa.ipac.caltech.edu`. For experiments, prefer cutouts and limit downloaded file counts.
 
-- [Visão geral, configuração e equipe](../README.md).
-- [Contrato público da API](../docs/api.md), [arquitetura](../docs/architecture.md) e
-  [documentação técnica completa em inglês (PDF)](../docs/cosmosphere-technical-documentation-en.pdf).
+## References
+
+- [Overview, configuration, team](../README.md).
+- [Public API contract](../docs/api.md), [architecture](../docs/architecture.md), [complete English technical PDF](../docs/cosmosphere-technical-documentation-en.pdf).

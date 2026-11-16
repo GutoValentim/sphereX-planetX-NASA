@@ -1,4 +1,4 @@
-# Sky Explorer — Design System v1.0
+# CosmoSPHERE — Design System v1.0
 
 Source of truth for visual decisions in `frontend/`. Visual language is inspired by
 NASA's information hierarchy and clean scientific layouts; it does not use NASA branding

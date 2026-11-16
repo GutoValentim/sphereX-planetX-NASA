@@ -1,101 +1,84 @@
 # AGENTS.md
 
-Guia para agentes de IA (Claude Code, Codex, Cursor etc.) que trabalham neste
-repositório. Vale para humanos também. Detalhes ficam nos READMEs citados; este
-arquivo resume o que é preciso saber antes de mudar algo.
+Guide for AI coding agents (Claude Code, Codex, Cursor, and others) working in this repository. The same guidance applies to human contributors. This file summarizes the essentials; detailed instructions are in the linked READMEs.
 
-## Projeto
+## Project
 
-SPHEREx Time Explorer — NASA Space Apps Challenge (Planet X / SPHEREx). Mostra
-como um ponto do céu muda ao longo das épocas observadas pelo SPHEREx (imagens
-alinhadas em falsa cor) e mede o espectro do alvo nas bandas D1–D6.
+**CosmoSPHERE — SPHEREx Explorer**, developed for NASA Space Apps Challenge (Planet X / SPHEREx). It shows how a sky position changes across SPHEREx observation epochs using aligned false-color images, and measures the target's spectrum in bands D1–D6.
 
-Documentação e textos do projeto são em português; código, nomes de símbolos e
-mensagens de commit em inglês (Conventional Commits: `feat:`, `fix(frontend):`…).
+Project documentation and copy are maintained in **English**, as are code symbols and commit messages (Conventional Commits: `feat:`, `fix(frontend):`, etc.). Preserve existing API routes, field names, accepted parameter values, and filenames when they are part of an implementation contract.
 
-## Arquitetura (produção)
+## Production architecture
 
-```
-Navegador ─HTTPS─▶ Traefik ─┬─▶ frontend (Node :8080)            rede web
-                            ├─▶ api (Node :3000) ─HTTP─▶ python (FastAPI :8000) ─HTTPS─▶ IRSA
-                            │                     rede interna spherex_internal
-                            └─▶ lab (Python :8765, senha) ─▶ motores v1, v2… (subprocessos) ─▶ IRSA
+```text
+Browser --HTTPS--> Traefik --+--> frontend (Node :8080)              web network
+                            +--> api (Node :3000) --HTTP--> python (FastAPI :8000) --HTTPS--> IRSA
+                            |                     spherex_internal network
+                            +--> lab (Python :8765, password) --> frozen v1, v2... engines (subprocesses) --> IRSA
 ```
 
-- Frontend React/Vite: <https://spherex.prospectordigital.com.br>
-- API Node/Express (gateway público): <https://api.spherex.prospectordigital.com.br>
-- FastAPI (`backend/app/main.py`): só na rede interna (`http://spherex-python:8000`);
-  cache gravável em `/opt/docker/spherex/cache`.
-- Lab (`dev/temporal-lab`): <https://lab.spherex.prospectordigital.com.br>, HTTP Basic
-  (credenciais em `/opt/docker/spherex/lab/CREDENTIALS.txt`); acervo em
-  `/opt/docker/spherex/lab` — **não apagar**: são os dados mapeados para o produto.
-- VPS Oracle ARM64, Docker, Portainer, Traefik. Deploy automático em todo push na
-  `main` (GitHub Actions). **Merge na `main` = publicação em produção.**
+- React/Vite frontend: <https://spherex.prospectordigital.com.br>.
+- Public Node/Express API: <https://api.spherex.prospectordigital.com.br>.
+- FastAPI (`backend/app/main.py`): internal network only, `http://spherex-python:8000`; writable cache at `/opt/docker/spherex/cache`.
+- Laboratory (`dev/temporal-lab`): <https://lab.spherex.prospectordigital.com.br>, HTTP Basic. Credentials: `/opt/docker/spherex/lab/CREDENTIALS.txt`; archive: `/opt/docker/spherex/lab` — **do not delete**, as it contains the product's pre-mapped data.
+- Oracle ARM64 VPS, Docker, Portainer, Traefik. GitHub Actions automatically deploys pushes to `main`. **Merging into `main` publishes to production.**
 
-Mais em `docs/architecture.md` e `infra/README.md`.
+See `docs/architecture.md` and `infra/README.md`.
 
-## Mapa do repositório
+## Repository map
 
-| Caminho | O que é |
+| Path | Contents |
 |---|---|
-| `frontend/` | React 19 + Vite + TypeScript (workspace npm). `src/services/api.ts` fala com a API; `server.mjs` serve o build e o `/healthz`. |
-| `backend/app/api/*.ts` | API Node/Express: `server.ts`, `consulta.ts` (encaminha ao Python), `resultados.ts` (jobs de espectro/sequência e arquivos). |
-| `backend/app/main.py` | FastAPI: `/receber-dados`, `/espectros/…`, `/sequencias/…`, `/healthz`. |
-| `backend/app/services/` | Núcleo científico: `irsa_client`, `image_aligner`, `frame_generator` (perfis de renderização), `spectral_color`, `temporal_sequence_service`, `sequence_jobs`, `spectrum_service`, `spectrum_jobs`, `spectrum_chart`, `cutout_cache`. |
-| `backend/tests/` | `api.test.ts` (Node) e `test_*.py` (Python). |
-| `infra/` | `compose.yaml`, `deploy.sh`, `ssh-deploy.sh`, testes de deploy. |
-| `dev/temporal-lab/` | Laboratório de mapeamento (publicado em `lab.spherex…`): `server.py` (gateway, registros, fila, exportação), `engine_server.py` (API científica, uma cópia congelada por versão do motor), `lab_store.py`. Ver o README dele. |
-| `prototypes/` | Protótipos isolados (ex.: `sky-sphere`). |
-| `docs/` | `api.md` (contratos), `architecture.md`, `DESIGN_SYSTEM.md`, doc do frontend. |
+| `frontend/` | React 19 + Vite + TypeScript npm workspace. `src/services/api.ts` calls the API; `server.mjs` serves the build and `/healthz` |
+| `backend/app/api/*.ts` | Node/Express API: `server.ts` starts `resultados.ts` (queries, image/spectrum jobs, files); `catalogo.ts` serves exports. `consulta.ts` is legacy scaffolding |
+| `backend/app/main.py` | FastAPI: `/receber-dados`, `/espectros/…`, `/sequencias/…`, `/healthz` |
+| `backend/app/services/` | Scientific core: `irsa_client`, `image_aligner`, `frame_generator` (rendering profiles), `spectral_color`, `temporal_sequence_service`, `sequence_jobs`, `spectrum_service`, `spectrum_jobs`, `spectrum_chart`, `cutout_cache` |
+| `backend/tests/` | Node `api.test.ts`, Python `test_*.py` |
+| `infra/` | `compose.yaml`, `deploy.sh`, `ssh-deploy.sh`, deployment tests |
+| `dev/temporal-lab/` | Published mapping lab: `server.py` (gateway, records, queue, export), `engine_server.py` (scientific API, frozen copy per engine version), `lab_store.py`. See its README |
+| `prototypes/` | Standalone prototypes such as `sky-sphere` |
+| `docs/` | API contracts, architecture, design system, frontend specification, technical PDF |
 
-Classificação usada pelo CI e pelo deploy: `backend/*.py` e
-`backend/requirements*.txt` → serviço Python **e** lab; `dev/temporal-lab/` → lab;
-resto de `backend/` → API Node; `frontend/` → frontend; `infra/` → stack inteira; `package.json`,
-`package-lock.json`, `eslint.config.mjs` → API e frontend. Arquivos fora disso
-(como este) não disparam deploy.
+CI and deployment classify `backend/*.py` and `backend/requirements*.txt` as Python **and** lab; `dev/temporal-lab/` as lab; other `backend/` files as Node API; `frontend/` as frontend; `infra/` as the full stack; `package.json`, `package-lock.json`, and `eslint.config.mjs` as API and frontend. Other paths, including this file, do not trigger deployment.
 
-## Contrato principal (detalhes em `docs/api.md`)
+## Main contract
 
-- `GET /api/consulta?RA&DEC&Data[&elemento=imagem|espectro][&bandas=D1,D3][&tema=escuro|claro]`
-  (também `POST` com JSON).
-  - `imagem` (padrão): metadados das observações + `sequencia` (job em
-    `/api/sequencias/<id>`; frames WebP alinhados por época e banda, em falsa
-    cor, que aparecem conforme ficam prontos).
-  - `espectro`: job em `/api/espectros/<id>`; pontos medidos + gráficos SVG.
-- Erros sempre `{ "erro": "…" }`. Sem `PYTHON_API_URL` a API responde 503; 502
-  se o Python estiver inacessível; 504 em timeout.
+See `docs/api.md` for details.
 
-Ciência que não é óbvia pelo código:
+- `GET /api/consulta?RA&DEC&Data[&elemento=imagem|espectro][&bandas=D1,D3][&tema=escuro|claro]`, also POST with JSON.
+  - `imagem` (default): observation metadata + `sequencia` (job at `/api/sequencias/<id>`; aligned per-epoch/per-band false-color WebPs appear as ready).
+  - `espectro`: job at `/api/espectros/<id>`; measured points and SVG charts.
+- Errors always use `{ "erro": "…" }`. Without `PYTHON_API_URL`, return 503; Python unreachable, 502; timeout, 504.
 
-- O espectro é fotometria forçada multi-época: o filtro do SPHEREx varia ao
-  longo do detector (`WCS-WAVE`), então cada observação mede o alvo em um único λ.
-- Recortes são baixados parcialmente (só até `IMAGE` ou `VARIANCE`; a tabela
-  EPSF de ~4 MB é pulada). A tabela `WCS-WAVE` fica em cache por
-  (detector, `[CALIB] spectral_wcs` uuid) em `<cache>/calibration`.
-- Todas as épocas usam a mesma grade TAN (6,15″/px) e o mesmo intervalo de
-  exibição; normalizar épocas separadamente cria falsa variação de brilho.
-- A falsa cor é só representação; o FITS continua sendo a fonte científica.
+Scientific details that are not obvious from code:
 
-## Rodar localmente
+- Spectra use multi-epoch forced photometry: the SPHEREx filter varies across the detector (`WCS-WAVE`), so each observation measures the target at one wavelength per band.
+- Cutouts are partially downloaded through IMAGE or VARIANCE; the approximately 4 MB EPSF table is skipped. `WCS-WAVE` tables are cached by detector and `[CALIB] spectral_wcs` UUID under `<cache>/calibration`.
+- All epochs use the same TAN grid (6.15″/px) and display interval. Independent normalization creates artificial brightness variation.
+- False color is a representation only; FITS remains the scientific source.
 
-Node 24 e Python 3.11+.
+## Running locally
+
+Node 24 and Python 3.11+.
 
 ```sh
 npm ci
 cp .env.example .env                      # PYTHON_API_URL=http://localhost:8000
-npm run dev                               # API Express :3000
+npm run dev                               # Express API :3000
 npm run dev --workspace frontend          # Vite :5173
 cd backend && pip install -r requirements-dev.txt && uvicorn app.main:app --port 8000 --reload
 ```
 
-Laboratório (a porta 8765 costuma estar ocupada; use outra e reaproveite o cache):
+The lab's port 8765 is often occupied. Use another port and reuse existing caches:
 
 ```sh
-SPHEREX_LAB_DATA_DIR="<dados do lab>" SPHEREX_LAB_CACHE_DIR="<cache antigo, opcional>" \
+SPHEREX_LAB_DATA_DIR="<lab data>" SPHEREX_LAB_CACHE_DIR="<optional previous cache>" \
   <venv>/bin/python dev/temporal-lab/server.py --port 8766
 ```
 
-## Validação antes de PR (mesmos passos do CI)
+## Pre-PR validation
+
+The same checks as CI:
 
 ```sh
 npx eslint backend frontend dev
@@ -110,28 +93,16 @@ node --test dev/temporal-lab/tests/*.test.mjs
 cd backend && <venv>/bin/python -m unittest discover -s tests -p 'test_*.py'
 ```
 
-## Regras e armadilhas
+## Rules and pitfalls
 
-- **Commit, PR e merge só quando o mantenedor pedir.** O merge na `main` publica
-  em produção; confira os `/healthz` depois (cada serviço informa o próprio SHA,
-  e um serviço não alterado continua no SHA anterior — isso é esperado).
-- `infra/deploy.sh` e `infra/ssh-deploy.sh` são instalados como root na VPS e o
-  CI **não** os atualiza. Se mudarem, instale via SSH administrativo antes do
-  merge (comando em `infra/README.md`).
-- Conflitos em `package-lock.json`: nunca resolver à mão; rode `npm install` na raiz.
-- Mudanças em `backend/app/**/*.py` chegam ao lab como “código novo”, mas não
-  alteram versões do motor já congeladas: quem testa cria uma versão nova na aba
-  “Versões do motor”. Mudar o formato do cache ou da API do `engine_server.py`
-  exige que a interface do lab continue compatível com as versões antigas.
-- `infra/tests` precisam rodar no bash 3.2 do macOS (sem `declare -A` nem `${x^^}`).
-- Docker local pode falhar com o keychain do macOS travado; teste containers em
-  containers descartáveis na VPS.
-- IRSA às vezes responde 503: os jobs repetem, mas uma camada pode terminar
-  `failed`. Não trate isso como bug do código sem reproduzir.
-- Limitações conhecidas: movimento próprio não é propagado (alvos rápidos como
-  WISE 0855 saem da abertura); `FLAGS` não usadas por falta da tabela oficial de
-  bits; espectro sem correção de abertura.
-- Downloads só de `https://irsa.ipac.caltech.edu`. Prefira cutouts e poucos
-  arquivos ao experimentar.
-- Nunca versione `.env`, `api.env` ou chaves (`~/.ssh/spherex_github_actions_ed25519`).
-- Ao mudar contrato da API, atualize `docs/api.md` no mesmo PR.
+- **Commit, PR, and merge only when requested by the maintainer.** Merging into `main` publishes to production. Check `/healthz` afterward. Each service reports its own SHA, so an unchanged service remaining on an older SHA is expected.
+- `infra/deploy.sh` and `infra/ssh-deploy.sh` are installed as root on the VPS; CI **does not update them**. If they change, install them through administrative SSH before merging; commands are in `infra/README.md`.
+- Never resolve `package-lock.json` conflicts manually; run `npm install` at the repository root.
+- Changes to `backend/app/**/*.py` reach the lab as new code but do not modify frozen engine versions. Testers create a new version in the engine-version tab. Changing cache formats or `engine_server.py` APIs must preserve compatibility with old engines in the laboratory interface.
+- `infra/tests` must run with macOS bash 3.2: no `declare -A` or `${x^^}`.
+- Local Docker may fail while the macOS keychain is locked; test containers using disposable VPS containers.
+- IRSA sometimes returns 503. Jobs retry, but a layer may finish `failed`. Reproduce the behavior before treating it as a code defect.
+- Known limits: no proper-motion propagation (fast targets such as WISE 0855 leave the aperture), FLAGS unused pending official bit definitions, no spectral aperture correction.
+- Downloads only from `https://irsa.ipac.caltech.edu`. Prefer cutouts and small file counts for experiments.
+- Never commit `.env`, `api.env`, or keys such as `~/.ssh/spherex_github_actions_ed25519`.
+- Update `docs/api.md` in the same PR whenever the API contract changes.

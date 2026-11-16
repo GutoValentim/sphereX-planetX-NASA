@@ -1,22 +1,22 @@
-# Sky Sphere (protótipo)
+# Sky Sphere prototype
 
-Validação de ideia: navegar pelo mapa all-sky da SPHEREx (PIA26600) como se o observador estivesse dentro de uma esfera.
+Concept validation: navigate the SPHEREx all-sky map (PIA26600) as though the observer were inside a sphere.
 
 ```sh
 node prototypes/sky-sphere/serve.mjs   # http://localhost:5180
 ```
 
-- Arraste para olhar em volta; scroll/pinça para zoom (ancorado no cursor).
-- Clique para marcar um alvo: a caixa mostra RA/Dec (ICRS, J2000), l/b galácticos e o FOV atual.
-- Botões alternam as duas imagens e ligam uma grade galáctica de 30°.
+- Drag to look around; scroll/pinch to zoom, anchored to the cursor.
+- Click to mark a target: the box displays RA/Dec (ICRS, J2000), Galactic l/b, and current FOV.
+- Buttons switch between two images and toggle a 30° Galactic grid.
 
-## Como funciona
+## How it works
 
-As imagens estão em projeção Mollweide e coordenadas galácticas. Não há pré-processamento: o fragment shader WebGL converte, para cada pixel, direção da câmera → (l, b) → coordenada Mollweide → UV da textura. A elipse é detectada automaticamente, então uma versão de maior resolução pode substituir os JPGs sem ajustes.
+Images use Mollweide projection and Galactic coordinates. There is no preprocessing: a WebGL fragment shader converts each screen pixel from camera direction → (l, b) → Mollweide coordinates → texture UV. Automatic ellipse detection lets higher-resolution JPGs replace the images without adjustments.
 
-RA/Dec são obtidos pela matriz de rotação galáctica → equatorial (Hipparcos/ICRS). Conferido: centro galáctico = RA 266.405°, Dec −28.936°.
+RA/Dec use the Galactic-to-equatorial rotation matrix (Hipparcos/ICRS). Verified Galactic center: RA 266.405°, Dec −28.936°.
 
-## Limitações
+## Limitations
 
-- Imagens de 2000 px (~0,18°/px): fica borrado com zoom alto.
-- Sem dependências e sem build; não faz parte do frontend React nem do CI.
+- 2000 px images (~0.18°/px) blur at high zoom.
+- No dependencies or build; separate from the React frontend and CI.

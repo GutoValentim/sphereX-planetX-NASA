@@ -1,16 +1,12 @@
 # CLAUDE.md
 
-As instruções do projeto ficam em `AGENTS.md`, compartilhado com outros agentes:
+Project instructions are in `AGENTS.md`, shared with other agents:
 
 @AGENTS.md
 
-## Específico do Claude Code
+## Claude Code specifics
 
-- Antes de qualquer mudança: `git fetch`, confira o estado da `main` e os
-  `/healthz` de produção (`curl https://api.spherex.prospectordigital.com.br/healthz`
-  e `curl https://spherex.prospectordigital.com.br/healthz`).
-- Trabalhe em branch `claude/<assunto>`; nunca faça push direto na `main`.
-- Rode a validação completa de `AGENTS.md` antes de abrir PR e informe o que não
-  pôde ser verificado (por exemplo, testes de container).
-- Comandos que chamam o IRSA ou geram sequências/espectros podem levar minutos:
-  rode em segundo plano.
+- Before any change, run `git fetch`, inspect `main`, and check production `/healthz` endpoints: `curl https://api.spherex.prospectordigital.com.br/healthz` and `curl https://spherex.prospectordigital.com.br/healthz`.
+- Work on a `claude/<topic>` branch; never push directly to `main`.
+- Run the full `AGENTS.md` validation before opening a PR, and report anything that could not be verified, such as container tests.
+- Commands contacting IRSA or generating sequences/spectra may take minutes; run them in the background.
