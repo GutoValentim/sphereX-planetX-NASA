@@ -8,7 +8,7 @@ Uberlândia, Minas Gerais, Brazil
 
 A web application for exploring real SPHEREx observations by celestial coordinates, comparing images across epochs, and viewing a target's spectrum in bands D1–D6. Developed for the **NASA Space Apps Challenge**, **Planet X and SPHEREx** challenge. This is an independent team project, not an official NASA product.
 
-**[Use CosmoSPHERE](https://spherex.prospectordigital.com.br)** · **[Complete technical documentation in English (PDF)](docs/cosmosphere-technical-documentation-en.pdf)** · **[Public repository](https://github.com/GutoValentim/sphereX-planetX-NASA)**
+**[Use CosmoSPHERE](https://spherex.prospectordigital.com.br)** · **[Watch the presentation video](https://drive.google.com/file/d/1xt4HQJ09D3Wwk2i0KqjHzUGhwhsYN4wH/view?usp=drive_link)** · **[Complete technical documentation in English (PDF)](docs/cosmosphere-technical-documentation-en.pdf)** · **[Public repository](https://github.com/GutoValentim/sphereX-planetX-NASA)**
 
 ## What the project does
 
